@@ -8,10 +8,7 @@ export async function GET(req: Request) {
 
     if (!conversationId) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Missing conversationId",
-        },
+        { success: false, error: "Missing conversationId" },
         { status: 400 }
       );
     }
@@ -23,6 +20,7 @@ export async function GET(req: Request) {
         conversation_id,
         role,
         content,
+        sources,
         created_at
       from messages
       where conversation_id = $1
@@ -39,10 +37,7 @@ export async function GET(req: Request) {
     console.error("List messages error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        error: error.message || "Failed to list messages",
-      },
+      { success: false, error: error.message || "Failed to list messages" },
       { status: 500 }
     );
   }
@@ -55,6 +50,7 @@ export async function POST(req: Request) {
     const conversationId = body.conversationId;
     const role = body.role;
     const content = body.content;
+    const sources = body.sources || null;
 
     if (!conversationId || !role || !content) {
       return NextResponse.json(
@@ -68,10 +64,7 @@ export async function POST(req: Request) {
 
     if (!["user", "assistant"].includes(role)) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Invalid role",
-        },
+        { success: false, error: "Invalid role" },
         { status: 400 }
       );
     }
@@ -81,12 +74,13 @@ export async function POST(req: Request) {
       insert into messages (
         conversation_id,
         role,
-        content
+        content,
+        sources
       )
-      values ($1, $2, $3)
-      returning id, conversation_id, role, content, created_at
+      values ($1, $2, $3, $4)
+      returning id, conversation_id, role, content, sources, created_at
       `,
-      [conversationId, role, content]
+      [conversationId, role, content, sources ? JSON.stringify(sources) : null]
     );
 
     await db.query(
@@ -112,10 +106,7 @@ export async function POST(req: Request) {
     console.error("Create message error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        error: error.message || "Failed to create message",
-      },
+      { success: false, error: error.message || "Failed to create message" },
       { status: 500 }
     );
   }

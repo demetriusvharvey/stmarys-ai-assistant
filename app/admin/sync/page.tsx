@@ -121,6 +121,37 @@ export default function SyncAdminPage() {
     }
   }
 
+  async function retryFailed() {
+    setProcessing(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/sharepoint/sync/retry-failed", {
+        method: "POST",
+      });
+
+      const json = await res.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "Failed to retry failed files");
+      }
+
+      setLastResult({
+        success: true,
+        processed: 0,
+        failed: 0,
+        message: `${json.retried} failed files moved back to pending.`,
+        results: [],
+      });
+
+      await loadDashboard();
+    } catch (err: any) {
+      setError(err.message || "Failed to retry failed files");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   async function startAutoProcess() {
     stopAutoRef.current = false;
     setAutoProcessing(true);
@@ -186,9 +217,11 @@ export default function SyncAdminPage() {
             <p className="text-sm font-medium text-slate-500">
               St. Mary&apos;s Home AI Assistant
             </p>
+
             <h1 className="text-3xl font-semibold tracking-tight">
               SharePoint Sync Admin
             </h1>
+
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
               Queue, process, monitor, and safely ingest every supported
               SharePoint document into the internal knowledge base.
@@ -226,8 +259,16 @@ export default function SyncAdminPage() {
         )}
 
         <section className="mb-6 grid gap-4 md:grid-cols-5">
-          <StatCard label="Documents" value={data?.documents?.total_documents || 0} />
-          <StatCard label="Vector Chunks" value={data?.chunks?.total_chunks || 0} />
+          <StatCard
+            label="Documents"
+            value={data?.documents?.total_documents || 0}
+          />
+
+          <StatCard
+            label="Vector Chunks"
+            value={data?.chunks?.total_chunks || 0}
+          />
+
           <StatCard label="Pending" value={pending} />
           <StatCard label="Synced" value={synced} />
           <StatCard label="Failed" value={failed} />
@@ -237,9 +278,11 @@ export default function SyncAdminPage() {
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Ingestion Progress</h2>
+
               <p className="text-sm text-slate-500">
-                {synced.toLocaleString()} of {totalQueued.toLocaleString()} queued
-                files synced. {pending.toLocaleString()} remaining.
+                {synced.toLocaleString()} of{" "}
+                {totalQueued.toLocaleString()} queued files synced.{" "}
+                {pending.toLocaleString()} remaining.
               </p>
             </div>
 
@@ -262,6 +305,16 @@ export default function SyncAdminPage() {
                 className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {processing ? "Processing..." : "Process Batch"}
+              </button>
+
+              <button
+                onClick={retryFailed}
+                disabled={
+                  processing || autoProcessing || failed === 0
+                }
+                className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Retry Failed
               </button>
 
               {!autoProcessing ? (
@@ -299,13 +352,32 @@ export default function SyncAdminPage() {
 
         {lastResult && (
           <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-lg font-semibold">Last Batch Result</h2>
+            <h2 className="mb-3 text-lg font-semibold">
+              Last Batch Result
+            </h2>
+
+            {lastResult.message && (
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                {lastResult.message}
+              </div>
+            )}
+
             <div className="mb-4 grid gap-3 md:grid-cols-3">
-              <MiniStat label="Processed" value={lastResult.processed} />
-              <MiniStat label="Failed" value={lastResult.failed} />
+              <MiniStat
+                label="Processed"
+                value={lastResult.processed}
+              />
+
+              <MiniStat
+                label="Failed"
+                value={lastResult.failed}
+              />
+
               <MiniStat
                 label="Duration"
-                value={`${Math.round((lastResult.durationMs || 0) / 1000)}s`}
+                value={`${Math.round(
+                  (lastResult.durationMs || 0) / 1000
+                )}s`}
               />
             </div>
 
@@ -319,15 +391,26 @@ export default function SyncAdminPage() {
                     <th className="px-4 py-3">Error</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {(lastResult.results || []).map((item, index) => (
-                    <tr key={`${item.file}-${index}`} className="border-t border-slate-100">
+                    <tr
+                      key={`${item.file}-${index}`}
+                      className="border-t border-slate-100"
+                    >
                       <td className="px-4 py-3">{item.file}</td>
+
                       <td className="px-4 py-3">
                         <StatusBadge status={item.status} />
                       </td>
-                      <td className="px-4 py-3">{item.chunks ?? "-"}</td>
-                      <td className="px-4 py-3 text-red-600">{item.error || "-"}</td>
+
+                      <td className="px-4 py-3">
+                        {item.chunks ?? "-"}
+                      </td>
+
+                      <td className="px-4 py-3 text-red-600">
+                        {item.error || "-"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -338,7 +421,9 @@ export default function SyncAdminPage() {
 
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold">Recent Jobs</h2>
+            <h2 className="mb-4 text-lg font-semibold">
+              Recent Jobs
+            </h2>
 
             <div className="overflow-auto rounded-xl border border-slate-100">
               <table className="w-full text-left text-sm">
@@ -350,15 +435,28 @@ export default function SyncAdminPage() {
                     <th className="px-4 py-3">Failed</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {(data?.recentJobs || []).map((job) => (
-                    <tr key={job.id} className="border-t border-slate-100">
+                    <tr
+                      key={job.id}
+                      className="border-t border-slate-100"
+                    >
                       <td className="px-4 py-3">
                         <StatusBadge status={job.status} />
                       </td>
-                      <td className="px-4 py-3">{job.supported_files}</td>
-                      <td className="px-4 py-3">{job.synced_files}</td>
-                      <td className="px-4 py-3">{job.failed_files}</td>
+
+                      <td className="px-4 py-3">
+                        {job.supported_files}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {job.synced_files}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {job.failed_files}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -367,7 +465,9 @@ export default function SyncAdminPage() {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold">Recent Failures</h2>
+            <h2 className="mb-4 text-lg font-semibold">
+              Recent Failures
+            </h2>
 
             <div className="max-h-96 overflow-auto rounded-xl border border-slate-100">
               <table className="w-full text-left text-sm">
@@ -378,14 +478,28 @@ export default function SyncAdminPage() {
                     <th className="px-4 py-3">Error</th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {(data?.recentFailures || []).map((failure, index) => (
-                    <tr key={`${failure.item_name}-${index}`} className="border-t border-slate-100">
-                      <td className="px-4 py-3 font-medium">{failure.item_name}</td>
-                      <td className="px-4 py-3 text-slate-600">{failure.site_name}</td>
-                      <td className="px-4 py-3 text-red-600">{failure.error}</td>
-                    </tr>
-                  ))}
+                  {(data?.recentFailures || []).map(
+                    (failure, index) => (
+                      <tr
+                        key={`${failure.item_name}-${index}`}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-4 py-3 font-medium">
+                          {failure.item_name}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-600">
+                          {failure.site_name}
+                        </td>
+
+                        <td className="px-4 py-3 text-red-600">
+                          {failure.error}
+                        </td>
+                      </tr>
+                    )
+                  )}
                 </tbody>
               </table>
             </div>
@@ -402,10 +516,19 @@ export default function SyncAdminPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="text-sm font-medium text-slate-500">
+        {label}
+      </p>
+
       <p className="mt-2 text-3xl font-semibold tracking-tight">
         {Number(value || 0).toLocaleString()}
       </p>
@@ -413,11 +536,22 @@ function StatCard({ label, value }: { label: string; value: number }) {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: number | string }) {
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | string;
+}) {
   return (
     <div className="rounded-xl bg-slate-50 px-4 py-3">
-      <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
+      <p className="text-xs font-medium uppercase text-slate-500">
+        {label}
+      </p>
+
+      <p className="mt-1 text-lg font-semibold">
+        {value}
+      </p>
     </div>
   );
 }
@@ -430,12 +564,15 @@ function StatusBadge({ status }: { status: string }) {
       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
       : normalized === "failed"
       ? "bg-red-50 text-red-700 border-red-200"
-      : normalized === "processing" || normalized === "discovering"
+      : normalized === "processing" ||
+        normalized === "discovering"
       ? "bg-blue-50 text-blue-700 border-blue-200"
       : "bg-slate-50 text-slate-700 border-slate-200";
 
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${classes}`}>
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${classes}`}
+    >
       {status}
     </span>
   );

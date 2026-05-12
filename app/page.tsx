@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Source = {
   id: string;
@@ -18,20 +18,32 @@ type Message = {
   sources?: Source[];
 };
 
+type Conversation = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
 const LOGO_URL =
   "https://saintmaryshome.org/wp-content/uploads/2025/05/SMH-Logo-2025_LinearStackedTagline-Color.svg";
 
+const STARTER_MESSAGE: Message = {
+  role: "assistant",
+  content:
+    "Hi, I’m the St. Mary’s AI Knowledge Assistant. Ask me about approved policies, SOPs, IT procedures, onboarding docs, SigmaCare, CareTracker, or SharePoint knowledge.",
+};
+
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi, I’m the St. Mary’s AI Knowledge Assistant. Ask me about approved policies, SOPs, IT procedures, onboarding docs, SigmaCare, CareTracker, or SharePoint knowledge.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    null
+  );
 
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingChats, setLoadingChats] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -41,31 +53,153 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  function newChat() {
-    setMessages([
-      {
-        role: "assistant",
-        content:
-          "Hi, I’m the St. Mary’s AI Knowledge Assistant. What would you like to know?",
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  async function loadConversations() {
+    setLoadingChats(true);
+
+    try {
+      const res = await fetch("/api/conversations", {
+        cache: "no-store",
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setConversations(data.conversations || []);
+      }
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+    } finally {
+      setLoadingChats(false);
+    }
+  }
+
+  async function createConversation(title = "New Chat") {
+    const res = await fetch("/api/conversations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    ]);
-    setQuestion("");
+      body: JSON.stringify({ title }),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.error || "Failed to create conversation");
+    }
+
+    await loadConversations();
+
+    return data.conversation as Conversation;
+  }
+
+  async function saveMessage(
+    conversationId: string,
+    role: "user" | "assistant",
+    content: string,
+    sources?: Source[]
+  ) {
+    await fetch("/api/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        conversationId,
+        role,
+        content,
+        sources: sources || null,
+      }),
+    });
+
+    await loadConversations();
+  }
+
+  async function newChat() {
+    try {
+      const conversation = await createConversation("New Chat");
+
+      setActiveConversationId(conversation.id);
+      setMessages([
+        {
+          role: "assistant",
+          content:
+            "Hi, I’m the St. Mary’s AI Knowledge Assistant. What would you like to know?",
+        },
+      ]);
+      setQuestion("");
+    } catch (error: any) {
+      console.error(error);
+    }
+  }
+
+  async function loadConversation(conversationId: string) {
+    setActiveConversationId(conversationId);
+    setLoading(true);
+
+    try {
+      const res = await fetch(
+        `/api/messages?conversationId=${conversationId}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to load messages");
+      }
+
+      const loadedMessages: Message[] = (data.messages || []).map(
+        (message: any) => ({
+          role: message.role,
+          content: message.content,
+          sources: message.sources || [],
+        })
+      );
+
+      setMessages(loadedMessages.length > 0 ? loadedMessages : [STARTER_MESSAGE]);
+    } catch (error: any) {
+      setMessages([
+        {
+          role: "assistant",
+          content: `Error loading conversation: ${error.message}`,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function askQuestion() {
     if (!question.trim() || loading) return;
 
-    const currentQuestion = question;
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: currentQuestion },
-    ]);
-
-    setQuestion("");
-    setLoading(true);
+    let conversationId = activeConversationId;
 
     try {
+      if (!conversationId) {
+        const conversation = await createConversation(question.slice(0, 60));
+        conversationId = conversation.id;
+        setActiveConversationId(conversation.id);
+      }
+
+      const currentQuestion = question;
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: currentQuestion },
+      ]);
+
+      setQuestion("");
+      setLoading(true);
+
+      await saveMessage(conversationId, "user", currentQuestion);
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -79,16 +213,27 @@ export default function Home() {
 
       const data = await res.json();
 
+      const assistantContent = data.success
+        ? data.answer
+        : `Error: ${data.error || "Something went wrong"}`;
+
+      const assistantSources = data.success ? data.sources || [] : [];
+
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: data.success
-            ? data.answer
-            : `Error: ${data.error || "Something went wrong"}`,
-          sources: data.success ? data.sources || [] : [],
+          content: assistantContent,
+          sources: assistantSources,
         },
       ]);
+
+      await saveMessage(
+        conversationId,
+        "assistant",
+        assistantContent,
+        assistantSources
+      );
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
@@ -157,9 +302,7 @@ export default function Home() {
       const data = await res.json();
 
       if (data.success) {
-        setSyncStatus(
-          `Sync job created. Open Sync Admin to process queued files.`
-        );
+        setSyncStatus("Sync job created. Open Sync Admin to process queued files.");
       } else {
         setSyncStatus(`Error: ${data.error}`);
       }
@@ -171,9 +314,9 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-[#171717]">
-      <div className="grid min-h-screen grid-cols-1 md:grid-cols-[280px_1fr]">
-        <aside className="hidden border-r border-[#e5e5e5] bg-[#f7f7f8] p-3 md:flex md:flex-col">
+    <main className="h-screen overflow-hidden bg-white text-[#171717]">
+      <div className="grid h-screen grid-cols-1 overflow-hidden md:grid-cols-[280px_1fr]">
+        <aside className="hidden h-screen overflow-y-auto border-r border-[#e5e5e5] bg-[#f7f7f8] p-3 md:flex md:flex-col">
           <div className="mb-4 rounded-xl bg-white p-3 shadow-sm">
             <img src={LOGO_URL} alt="St. Mary's Home" className="h-14 w-auto" />
           </div>
@@ -224,20 +367,37 @@ export default function Home() {
               Recent chats
             </p>
 
-            <div className="space-y-1 text-sm">
-              <button className="w-full truncate rounded-lg px-3 py-2 text-left text-[#444] hover:bg-[#ececec]">
-                CareTracker procedures
-              </button>
-              <button className="w-full truncate rounded-lg px-3 py-2 text-left text-[#444] hover:bg-[#ececec]">
-                SigmaCare offline steps
-              </button>
-              <button className="w-full truncate rounded-lg px-3 py-2 text-left text-[#444] hover:bg-[#ececec]">
-                IT onboarding help
-              </button>
+            <div className="max-h-64 space-y-1 overflow-y-auto text-sm">
+              {loadingChats && (
+                <p className="px-3 py-2 text-xs text-[#777]">
+                  Loading chats...
+                </p>
+              )}
+
+              {!loadingChats && conversations.length === 0 && (
+                <p className="px-3 py-2 text-xs text-[#777]">
+                  No saved chats yet.
+                </p>
+              )}
+
+              {conversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  onClick={() => loadConversation(conversation.id)}
+                  className={`w-full truncate rounded-lg px-3 py-2 text-left hover:bg-[#ececec] ${
+                    activeConversationId === conversation.id
+                      ? "bg-[#ececec] text-[#111]"
+                      : "text-[#444]"
+                  }`}
+                  title={conversation.title}
+                >
+                  {conversation.title || "New Chat"}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="mt-auto space-y-3">
+          <div className="mt-auto space-y-3 pt-4">
             <div className="rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-sm">
               <p className="text-xs font-semibold text-[#333]">
                 Manual Upload
@@ -287,9 +447,10 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="flex min-h-screen flex-col bg-white">
+        <section className="flex h-screen min-h-0 flex-col bg-white">
           <header className="flex items-center justify-between border-b border-[#eeeeee] px-4 py-3 md:hidden">
             <img src={LOGO_URL} alt="St. Mary's Home" className="h-10 w-auto" />
+
             <div className="flex items-center gap-2">
               <a
                 href="/admin/sync"
@@ -297,6 +458,7 @@ export default function Home() {
               >
                 Sync
               </a>
+
               <button
                 onClick={newChat}
                 className="rounded-lg border border-[#d9d9d9] px-3 py-2 text-sm"
@@ -306,7 +468,7 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto px-4 py-8">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8">
             <div className="mx-auto max-w-3xl">
               {messages.length <= 1 && (
                 <div className="mb-10 mt-8 text-center">
@@ -401,7 +563,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="border-t border-[#eeeeee] bg-white px-4 py-4">
+          <div className="shrink-0 border-t border-[#eeeeee] bg-white px-4 py-4">
             <div className="mx-auto max-w-3xl">
               <div className="flex items-end gap-3 rounded-2xl border border-[#d9d9d9] bg-white px-4 py-3 shadow-sm">
                 <textarea
