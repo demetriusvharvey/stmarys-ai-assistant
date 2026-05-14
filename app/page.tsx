@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { ClipboardEvent, useEffect, useRef, useState } from "react";
 
 type Source = {
   id: string;
@@ -16,6 +16,8 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  imageUrl?: string;
+  imageName?: string;
 };
 
 type Conversation = {
@@ -45,17 +47,174 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
 
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
   const [uploading, setUploading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [category, setCategory] = useState("IT");
   const [uploadStatus, setUploadStatus] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadConversations();
   }, []);
+
+  function handleImageSelect(file: File | null) {
+    setSelectedImage(file);
+
+    setImagePreviewUrl((currentUrl) => {
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  function handleImagePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+
+        if (file) {
+          const pastedImage = new File(
+            [file],
+            `pasted-screenshot-${Date.now()}.png`,
+            { type: file.type || "image/png" }
+          );
+
+          handleImageSelect(pastedImage);
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+  }
+
+  async function copyMessage(content: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedIndex(index);
+
+      setTimeout(() => {
+        setCopiedIndex(null);
+      }, 1500);
+    } catch (error) {
+      console.error("Failed to copy message:", error);
+    }
+  }
+
+  function printMessage(message: Message) {
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+
+    if (!printWindow) return;
+
+    const safeContent = message.content
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br />");
+
+    const sourceHtml =
+      message.sources && message.sources.length > 0
+        ? `
+          <h2>Sources</h2>
+          <ul>
+            ${message.sources
+              .slice(0, 6)
+              .map(
+                (source) => `
+                  <li>
+                    <strong>${source.title || "Untitled source"}</strong><br />
+                    ${source.category || "Unknown category"}
+                    ${
+                      source.sourceUrl
+                        ? `<br /><a href="${source.sourceUrl}">${source.sourceUrl}</a>`
+                        : ""
+                    }
+                  </li>
+                `
+              )
+              .join("")}
+          </ul>
+        `
+        : "";
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>St. Mary's AI Assistant Response</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 32px;
+              color: #111827;
+              line-height: 1.6;
+            }
+            .header {
+              border-bottom: 1px solid #e5e7eb;
+              margin-bottom: 24px;
+              padding-bottom: 16px;
+            }
+            h1 {
+              font-size: 22px;
+              margin: 0;
+            }
+            h2 {
+              margin-top: 28px;
+              font-size: 16px;
+            }
+            .content {
+              white-space: normal;
+              font-size: 14px;
+            }
+            li {
+              margin-bottom: 12px;
+              font-size: 13px;
+            }
+            a {
+              color: #0f766e;
+              word-break: break-all;
+            }
+            .footer {
+              margin-top: 32px;
+              padding-top: 16px;
+              border-top: 1px solid #e5e7eb;
+              font-size: 11px;
+              color: #6b7280;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>St. Mary's AI Assistant Response</h1>
+          </div>
+
+          <div class="content">${safeContent}</div>
+
+          ${sourceHtml}
+
+          <div class="footer">
+            Answers should be verified against source documents before operational use.
+          </div>
+
+          <script>
+            window.onload = () => {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
 
   async function loadConversations() {
     setLoadingChats(true);
@@ -132,6 +291,7 @@ export default function Home() {
         },
       ]);
       setQuestion("");
+      handleImageSelect(null);
     } catch (error: any) {
       console.error(error);
     }
@@ -177,28 +337,84 @@ export default function Home() {
   }
 
   async function askQuestion() {
-    if (!question.trim() || loading) return;
+    if ((!question.trim() && !selectedImage) || loading) return;
 
     let conversationId = activeConversationId;
 
     try {
       if (!conversationId) {
-        const conversation = await createConversation(question.slice(0, 60));
+        const conversation = await createConversation(
+          question.trim() ? question.slice(0, 60) : "Image conversation"
+        );
         conversationId = conversation.id;
         setActiveConversationId(conversation.id);
       }
 
-      const currentQuestion = question;
+      const currentQuestion = question.trim();
+      const imageFile = selectedImage;
+      const currentImagePreviewUrl = imagePreviewUrl;
+
+      const userContent = currentQuestion || "";
 
       setMessages((prev) => [
         ...prev,
-        { role: "user", content: currentQuestion },
+        {
+          role: "user",
+          content: userContent,
+          imageUrl: currentImagePreviewUrl || undefined,
+          imageName: imageFile?.name,
+        },
       ]);
 
       setQuestion("");
+      setSelectedImage(null);
+      setImagePreviewUrl(null);
       setLoading(true);
 
-      await saveMessage(conversationId, "user", currentQuestion);
+      await saveMessage(
+        conversationId,
+        "user",
+        imageFile ? currentQuestion || "[Image uploaded]" : currentQuestion
+      );
+
+      if (imageFile) {
+        const formData = new FormData();
+
+        formData.append("image", imageFile);
+        formData.append("question", currentQuestion);
+        formData.append("conversationId", conversationId);
+
+        const res = await fetch("/api/analyze-image", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        const assistantContent = data.success
+          ? data.answer
+          : `Error: ${data.error || "Something went wrong analyzing the image."}`;
+
+        const assistantSources = data.success ? data.sources || [] : [];
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: assistantContent,
+            sources: assistantSources,
+          },
+        ]);
+
+        await saveMessage(
+          conversationId,
+          "assistant",
+          assistantContent,
+          assistantSources
+        );
+
+        return;
+      }
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -208,6 +424,7 @@ export default function Home() {
         body: JSON.stringify({
           question: currentQuestion,
           userEmail: "demo@stmarys.local",
+          conversationId,
         }),
       });
 
@@ -369,9 +586,7 @@ export default function Home() {
 
             <div className="max-h-64 space-y-1 overflow-y-auto text-sm">
               {loadingChats && (
-                <p className="px-3 py-2 text-xs text-[#777]">
-                  Loading chats...
-                </p>
+                <p className="px-3 py-2 text-xs text-[#777]">Loading chats...</p>
               )}
 
               {!loadingChats && conversations.length === 0 && (
@@ -399,9 +614,7 @@ export default function Home() {
 
           <div className="mt-auto space-y-3 pt-4">
             <div className="rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-sm">
-              <p className="text-xs font-semibold text-[#333]">
-                Manual Upload
-              </p>
+              <p className="text-xs font-semibold text-[#333]">Manual Upload</p>
 
               <div className="mt-3 space-y-3">
                 <select
@@ -433,9 +646,7 @@ export default function Home() {
                 </button>
 
                 {uploadStatus && (
-                  <p className="text-xs leading-5 text-[#666]">
-                    {uploadStatus}
-                  </p>
+                  <p className="text-xs leading-5 text-[#666]">{uploadStatus}</p>
                 )}
               </div>
             </div>
@@ -482,11 +693,32 @@ export default function Home() {
                     St. Mary&apos;s AI Knowledge Assistant
                   </h1>
 
-                  <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#666]">
+                  <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[#666]">
                     Ask questions across approved SharePoint documents, SOPs,
-                    policies, onboarding materials, IT guides, and operational
-                    knowledge.
+                    policies, onboarding materials, IT guides, operational
+                    workflows, screenshots, and internal knowledge.
                   </p>
+
+                  <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                    {[
+                      "Reset voicemail",
+                      "Explain this screenshot",
+                      "How do I onboard a user?",
+                      "CareTracker kiosk issue",
+                      "Printer troubleshooting",
+                      "SigmaCare access help",
+                      "Setup Outlook on iPhone",
+                      "SharePoint sync status",
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        onClick={() => setQuestion(prompt)}
+                        className="rounded-full border border-[#d9d9d9] bg-white px-4 py-2 text-xs font-medium text-[#444] shadow-sm transition hover:bg-[#f7f7f8]"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -505,7 +737,113 @@ export default function Home() {
                           : "bg-[#f7f7f8] text-[#171717]"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      {message.imageUrl && (
+                        <img
+                          src={message.imageUrl}
+                          alt={message.imageName || "Uploaded image"}
+                          className="mb-3 max-h-[420px] w-full rounded-2xl object-contain"
+                        />
+                      )}
+
+                      {message.content && (
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      )}
+
+                      {message.role === "assistant" && message.content && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => copyMessage(message.content, index)}
+                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                          >
+                            {copiedIndex === index ? "Copied" : "Copy"}
+                          </button>
+
+                          <button
+                            onClick={() => printMessage(message)}
+                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                          >
+                            Print
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              await fetch("/api/feedback", {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  conversationId: activeConversationId,
+                                  feedbackType: "helpful",
+                                  question:
+                                    messages[index - 1]?.role === "user"
+                                      ? messages[index - 1]?.content
+                                      : null,
+                                  answer: message.content,
+                                  sources: message.sources || [],
+                                }),
+                              });
+
+                              alert("Helpful feedback saved");
+                            }}
+                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                          >
+                            👍 Helpful
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              await fetch("/api/feedback", {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  conversationId: activeConversationId,
+                                  feedbackType: "incorrect",
+                                  question:
+                                    messages[index - 1]?.role === "user"
+                                      ? messages[index - 1]?.content
+                                      : null,
+                                  answer: message.content,
+                                  sources: message.sources || [],
+                                }),
+                              });
+
+                              alert("Incorrect feedback saved");
+                            }}
+                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                          >
+                            👎 Incorrect
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              await fetch("/api/feedback", {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  conversationId: activeConversationId,
+                                  feedbackType: "report_issue",
+                                  question:
+                                    messages[index - 1]?.role === "user"
+                                      ? messages[index - 1]?.content
+                                      : null,
+                                  answer: message.content,
+                                  sources: message.sources || [],
+                                }),
+                              });
+
+                              alert("Issue reported");
+                            }}
+                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                          >
+                            ⚠ Report Issue
+                          </button>
+                        </div>
+                      )}
 
                       {message.role === "assistant" &&
                         message.sources &&
@@ -555,7 +893,7 @@ export default function Home() {
                 {loading && (
                   <div className="flex justify-start">
                     <div className="rounded-3xl bg-[#f7f7f8] px-5 py-4 text-sm text-[#666] shadow-sm">
-                      Searching approved knowledge...
+                      Thinking...
                     </div>
                   </div>
                 )}
@@ -565,24 +903,76 @@ export default function Home() {
 
           <div className="shrink-0 border-t border-[#eeeeee] bg-white px-4 py-4">
             <div className="mx-auto max-w-3xl">
+              {imagePreviewUrl && (
+                <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-[#f7f7f8] p-3">
+                  <div className="flex items-start gap-3">
+                    <img
+                      src={imagePreviewUrl}
+                      alt="Selected image"
+                      className="h-24 w-32 rounded-xl object-cover"
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[#222]">
+                        {selectedImage?.name}
+                      </p>
+                      <p className="mt-1 text-xs text-[#666]">
+                        Image ready. Add a question or press Send.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => handleImageSelect(null)}
+                      className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs hover:bg-[#f1f1f1]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-end gap-3 rounded-2xl border border-[#d9d9d9] bg-white px-4 py-3 shadow-sm">
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) =>
+                    handleImageSelect(e.target.files?.[0] || null)
+                  }
+                />
+
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={loading}
+                  className="rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#f7f7f8] disabled:opacity-50"
+                  title="Attach image"
+                >
+                  +
+                </button>
+
                 <textarea
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
+                  onPaste={handleImagePaste}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       askQuestion();
                     }
                   }}
-                  placeholder="Message St. Mary's AI..."
+                  placeholder={
+                    selectedImage
+                      ? "Ask about this image..."
+                      : "Message St. Mary's AI..."
+                  }
                   rows={1}
                   className="max-h-32 flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-[#999]"
                 />
 
                 <button
                   onClick={askQuestion}
-                  disabled={loading}
+                  disabled={loading || (!question.trim() && !selectedImage)}
                   className="rounded-xl bg-[#171717] px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
                 >
                   Send

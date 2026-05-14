@@ -56,13 +56,33 @@ type ProcessResult = {
   }[];
 };
 
+type ReconcileResult = {
+  success: boolean;
+  scannedSites: number;
+  scannedDrives: number;
+  skippedSites: number;
+  skippedDrives: number;
+  currentSupportedFiles: number;
+  activeSharePointDocumentsInDatabase: number;
+  archivedMissingDocuments: number;
+  archivedPreview?: {
+    id: string;
+    title: string;
+    externalId: string;
+  }[];
+};
+
 export default function SyncAdminPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [batchSize, setBatchSize] = useState(10);
   const [lastResult, setLastResult] = useState<ProcessResult | null>(null);
+  const [lastReconcile, setLastReconcile] = useState<ReconcileResult | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
 
   const stopAutoRef = useRef(false);
@@ -152,6 +172,46 @@ export default function SyncAdminPage() {
     }
   }
 
+  async function reconcileDeletedDocs() {
+    const confirmed = window.confirm(
+      "This will crawl SharePoint and archive AI documents that no longer exist in SharePoint. Continue?"
+    );
+
+    if (!confirmed) return;
+
+    setReconciling(true);
+    setError(null);
+    setLastReconcile(null);
+
+    try {
+      const res = await fetch("/api/sharepoint/reconcile", {
+        method: "POST",
+      });
+
+      const json = await res.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "SharePoint reconciliation failed");
+      }
+
+      setLastReconcile(json);
+
+      setLastResult({
+        success: true,
+        processed: 0,
+        failed: 0,
+        message: `Reconciliation complete. Archived ${json.archivedMissingDocuments} missing/deleted SharePoint documents.`,
+        results: [],
+      });
+
+      await loadDashboard();
+    } catch (err: any) {
+      setError(err.message || "SharePoint reconciliation failed");
+    } finally {
+      setReconciling(false);
+    }
+  }
+
   async function startAutoProcess() {
     stopAutoRef.current = false;
     setAutoProcessing(true);
@@ -209,6 +269,8 @@ export default function SyncAdminPage() {
   const progress =
     totalQueued > 0 ? Math.round((synced / totalQueued) * 100) : 0;
 
+  const controlsDisabled = processing || autoProcessing || reconciling;
+
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-slate-900">
       <div className="mx-auto max-w-7xl px-6 py-6">
@@ -223,7 +285,7 @@ export default function SyncAdminPage() {
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Queue, process, monitor, and safely ingest every supported
+              Queue, process, reconcile, and safely ingest every supported
               SharePoint document into the internal knowledge base.
             </p>
           </div>
@@ -231,7 +293,8 @@ export default function SyncAdminPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={loadDashboard}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              disabled={reconciling}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Refresh
             </button>
@@ -255,6 +318,14 @@ export default function SyncAdminPage() {
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {reconciling && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Reconciling SharePoint documents. This can take a while because it
+            crawls current SharePoint files and compares them against the AI
+            knowledge base.
           </div>
         )}
 
@@ -291,7 +362,7 @@ export default function SyncAdminPage() {
                 value={batchSize}
                 onChange={(e) => setBatchSize(Number(e.target.value))}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                disabled={processing || autoProcessing}
+                disabled={controlsDisabled}
               >
                 <option value={5}>Batch 5</option>
                 <option value={10}>Batch 10</option>
@@ -301,7 +372,7 @@ export default function SyncAdminPage() {
 
               <button
                 onClick={() => processBatch(batchSize)}
-                disabled={processing || autoProcessing}
+                disabled={controlsDisabled}
                 className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {processing ? "Processing..." : "Process Batch"}
@@ -309,18 +380,24 @@ export default function SyncAdminPage() {
 
               <button
                 onClick={retryFailed}
-                disabled={
-                  processing || autoProcessing || failed === 0
-                }
+                disabled={controlsDisabled || failed === 0}
                 className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Retry Failed
               </button>
 
+              <button
+                onClick={reconcileDeletedDocs}
+                disabled={controlsDisabled}
+                className="rounded-xl bg-purple-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reconciling ? "Reconciling..." : "Reconcile Deleted Docs"}
+              </button>
+
               {!autoProcessing ? (
                 <button
                   onClick={startAutoProcess}
-                  disabled={processing || pending === 0}
+                  disabled={processing || reconciling || pending === 0}
                   className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Auto Process All
@@ -350,11 +427,66 @@ export default function SyncAdminPage() {
           </div>
         </section>
 
+        {lastReconcile && (
+          <section className="mb-6 rounded-2xl border border-purple-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">
+              Last Reconciliation Result
+            </h2>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              <MiniStat
+                label="SharePoint Files"
+                value={lastReconcile.currentSupportedFiles}
+              />
+              <MiniStat
+                label="DB Active Docs"
+                value={lastReconcile.activeSharePointDocumentsInDatabase}
+              />
+              <MiniStat
+                label="Archived"
+                value={lastReconcile.archivedMissingDocuments}
+              />
+              <MiniStat
+                label="Skipped Sites"
+                value={lastReconcile.skippedSites}
+              />
+            </div>
+
+            <p className="mb-4 text-sm text-slate-600">
+              Scanned {lastReconcile.scannedSites.toLocaleString()} sites and{" "}
+              {lastReconcile.scannedDrives.toLocaleString()} drives. Skipped{" "}
+              {lastReconcile.skippedDrives.toLocaleString()} drives.
+            </p>
+
+            {(lastReconcile.archivedPreview || []).length > 0 && (
+              <div className="max-h-72 overflow-auto rounded-xl border border-slate-100">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Archived Document</th>
+                      <th className="px-4 py-3">Document ID</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {(lastReconcile.archivedPreview || []).map((doc) => (
+                      <tr key={doc.id} className="border-t border-slate-100">
+                        <td className="px-4 py-3 font-medium">{doc.title}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          {doc.id}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
         {lastResult && (
           <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-lg font-semibold">
-              Last Batch Result
-            </h2>
+            <h2 className="mb-3 text-lg font-semibold">Last Batch Result</h2>
 
             {lastResult.message && (
               <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
@@ -363,21 +495,13 @@ export default function SyncAdminPage() {
             )}
 
             <div className="mb-4 grid gap-3 md:grid-cols-3">
-              <MiniStat
-                label="Processed"
-                value={lastResult.processed}
-              />
+              <MiniStat label="Processed" value={lastResult.processed} />
 
-              <MiniStat
-                label="Failed"
-                value={lastResult.failed}
-              />
+              <MiniStat label="Failed" value={lastResult.failed} />
 
               <MiniStat
                 label="Duration"
-                value={`${Math.round(
-                  (lastResult.durationMs || 0) / 1000
-                )}s`}
+                value={`${Math.round((lastResult.durationMs || 0) / 1000)}s`}
               />
             </div>
 
@@ -404,9 +528,7 @@ export default function SyncAdminPage() {
                         <StatusBadge status={item.status} />
                       </td>
 
-                      <td className="px-4 py-3">
-                        {item.chunks ?? "-"}
-                      </td>
+                      <td className="px-4 py-3">{item.chunks ?? "-"}</td>
 
                       <td className="px-4 py-3 text-red-600">
                         {item.error || "-"}
@@ -421,9 +543,7 @@ export default function SyncAdminPage() {
 
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold">
-              Recent Jobs
-            </h2>
+            <h2 className="mb-4 text-lg font-semibold">Recent Jobs</h2>
 
             <div className="overflow-auto rounded-xl border border-slate-100">
               <table className="w-full text-left text-sm">
@@ -438,25 +558,16 @@ export default function SyncAdminPage() {
 
                 <tbody>
                   {(data?.recentJobs || []).map((job) => (
-                    <tr
-                      key={job.id}
-                      className="border-t border-slate-100"
-                    >
+                    <tr key={job.id} className="border-t border-slate-100">
                       <td className="px-4 py-3">
                         <StatusBadge status={job.status} />
                       </td>
 
-                      <td className="px-4 py-3">
-                        {job.supported_files}
-                      </td>
+                      <td className="px-4 py-3">{job.supported_files}</td>
 
-                      <td className="px-4 py-3">
-                        {job.synced_files}
-                      </td>
+                      <td className="px-4 py-3">{job.synced_files}</td>
 
-                      <td className="px-4 py-3">
-                        {job.failed_files}
-                      </td>
+                      <td className="px-4 py-3">{job.failed_files}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -465,9 +576,7 @@ export default function SyncAdminPage() {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold">
-              Recent Failures
-            </h2>
+            <h2 className="mb-4 text-lg font-semibold">Recent Failures</h2>
 
             <div className="max-h-96 overflow-auto rounded-xl border border-slate-100">
               <table className="w-full text-left text-sm">
@@ -480,26 +589,24 @@ export default function SyncAdminPage() {
                 </thead>
 
                 <tbody>
-                  {(data?.recentFailures || []).map(
-                    (failure, index) => (
-                      <tr
-                        key={`${failure.item_name}-${index}`}
-                        className="border-t border-slate-100"
-                      >
-                        <td className="px-4 py-3 font-medium">
-                          {failure.item_name}
-                        </td>
+                  {(data?.recentFailures || []).map((failure, index) => (
+                    <tr
+                      key={`${failure.item_name}-${index}`}
+                      className="border-t border-slate-100"
+                    >
+                      <td className="px-4 py-3 font-medium">
+                        {failure.item_name}
+                      </td>
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {failure.site_name}
-                        </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {failure.site_name}
+                      </td>
 
-                        <td className="px-4 py-3 text-red-600">
-                          {failure.error}
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      <td className="px-4 py-3 text-red-600">
+                        {failure.error}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -516,18 +623,10 @@ export default function SyncAdminPage() {
   );
 }
 
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
+function StatCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">
-        {label}
-      </p>
+      <p className="text-sm font-medium text-slate-500">{label}</p>
 
       <p className="mt-2 text-3xl font-semibold tracking-tight">
         {Number(value || 0).toLocaleString()}
@@ -545,13 +644,9 @@ function MiniStat({
 }) {
   return (
     <div className="rounded-xl bg-slate-50 px-4 py-3">
-      <p className="text-xs font-medium uppercase text-slate-500">
-        {label}
-      </p>
+      <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
 
-      <p className="mt-1 text-lg font-semibold">
-        {value}
-      </p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
   );
 }
@@ -564,8 +659,7 @@ function StatusBadge({ status }: { status: string }) {
       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
       : normalized === "failed"
       ? "bg-red-50 text-red-700 border-red-200"
-      : normalized === "processing" ||
-        normalized === "discovering"
+      : normalized === "processing" || normalized === "discovering"
       ? "bg-blue-50 text-blue-700 border-blue-200"
       : "bg-slate-50 text-slate-700 border-slate-200";
 
