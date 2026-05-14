@@ -9,6 +9,8 @@ type StoredMessage = {
   content: string;
 };
 
+type UrgencyLevel = "low" | "medium" | "high";
+
 function toOpenAIMessages(messages: StoredMessage[]) {
   return messages
     .filter(
@@ -32,6 +34,134 @@ function getAnswerMode(topSimilarity: number) {
   }
 
   return "general_guidance";
+}
+
+function getEscalationGuidance(question: string, answer: string) {
+  const lowerQuestion = question.toLowerCase();
+  const lowerAnswer = answer.toLowerCase();
+  const combined = `${lowerQuestion} ${lowerAnswer}`;
+
+  let team: string | null = null;
+  let urgency: UrgencyLevel = "low";
+  let recommendedNextStep: string | null = null;
+
+  if (
+    combined.includes("printer") ||
+    combined.includes("outlook") ||
+    combined.includes("sharepoint") ||
+    combined.includes("password") ||
+    combined.includes("voicemail") ||
+    combined.includes("computer") ||
+    combined.includes("laptop") ||
+    combined.includes("teams") ||
+    combined.includes("caretracker") ||
+    combined.includes("sigmacare") ||
+    combined.includes("email") ||
+    combined.includes("login") ||
+    combined.includes("access")
+  ) {
+    team = "IT Support";
+    recommendedNextStep =
+      "If the issue continues after basic troubleshooting, contact IT Support with the user, device, screenshot, and exact error.";
+  }
+
+  if (
+    combined.includes("payroll") ||
+    combined.includes("paycheck") ||
+    combined.includes("pto") ||
+    combined.includes("timecard") ||
+    combined.includes("benefits")
+  ) {
+    team = "HR / Payroll";
+    recommendedNextStep =
+      "Escalate to HR or Payroll with the employee name, date, and specific payroll or timecard concern.";
+  }
+
+  if (
+    combined.includes("medication") ||
+    combined.includes("clinical") ||
+    combined.includes("resident care") ||
+    combined.includes("patient") ||
+    combined.includes("nursing") ||
+    combined.includes("care plan")
+  ) {
+    team = "Clinical Leadership";
+    recommendedNextStep =
+      "Escalate to nursing leadership or the appropriate clinical supervisor. Do not rely on AI for clinical decisions.";
+    urgency = "medium";
+  }
+
+  if (
+    combined.includes("door") ||
+    combined.includes("alarm") ||
+    combined.includes("badge access") ||
+    combined.includes("camera") ||
+    combined.includes("security") ||
+    combined.includes("keypad")
+  ) {
+    team = "Security / Facilities";
+    recommendedNextStep =
+      "Escalate to Security, Facilities, or IT depending on whether this is physical access, building equipment, or system access.";
+  }
+
+  if (
+    combined.includes("maintenance") ||
+    combined.includes("hvac") ||
+    combined.includes("water leak") ||
+    combined.includes("plumbing") ||
+    combined.includes("electrical")
+  ) {
+    team = "Maintenance";
+    recommendedNextStep =
+      "Escalate to Maintenance with the location, room/unit, urgency, and photos if available.";
+  }
+
+  if (
+    combined.includes("urgent") ||
+    combined.includes("emergency") ||
+    combined.includes("unsafe") ||
+    combined.includes("danger") ||
+    combined.includes("fire") ||
+    combined.includes("flood") ||
+    combined.includes("injury") ||
+    combined.includes("down") ||
+    combined.includes("outage")
+  ) {
+    urgency = "high";
+  }
+
+  if (!team && urgency === "high") {
+    team = "Leadership / Supervisor";
+    recommendedNextStep =
+      "Escalate immediately to the appropriate supervisor or leadership contact for the area involved.";
+  }
+
+  return {
+    team,
+    urgency,
+    recommendedNextStep,
+    shouldEscalate: Boolean(team),
+  };
+}
+
+function isTrainingOrOnboardingRequest(question: string) {
+  const lowerQuestion = question.toLowerCase();
+
+  return (
+    lowerQuestion.includes("how do i") ||
+    lowerQuestion.includes("walk me through") ||
+    lowerQuestion.includes("setup") ||
+    lowerQuestion.includes("set up") ||
+    lowerQuestion.includes("configure") ||
+    lowerQuestion.includes("onboard") ||
+    lowerQuestion.includes("install") ||
+    lowerQuestion.includes("create account") ||
+    lowerQuestion.includes("training") ||
+    lowerQuestion.includes("show me how") ||
+    lowerQuestion.includes("steps") ||
+    lowerQuestion.includes("procedure") ||
+    lowerQuestion.includes("process")
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -95,6 +225,7 @@ export async function POST(req: NextRequest) {
 
     const topSimilarity = Number(matches.rows[0]?.similarity || 0);
     const answerMode = getAnswerMode(topSimilarity);
+    const trainingMode = isTrainingOrOnboardingRequest(question);
 
     const context = matches.rows
       .map((row: any, index: number) => {
@@ -115,7 +246,7 @@ ${row.content}
         {
           role: "system",
           content: `
-You are St. Mary's internal AI knowledge assistant and IT troubleshooting copilot.
+You are St. Mary's internal AI knowledge assistant and operational copilot.
 
 Your job:
 - Help staff solve operational, IT, SharePoint, CareTracker, SigmaCare, phone, printer, onboarding, and workflow issues.
@@ -131,6 +262,36 @@ Your job:
 - If the user's question is ambiguous and history does not clarify it, ask 1-3 smart follow-up questions.
 - If the user says your previous answer was wrong or inaccurate, acknowledge it, explain what may have happened, and ask a better clarifying question.
 - Keep answers practical, step-by-step, and helpful.
+
+Training and onboarding behavior:
+- When the user asks operational or onboarding questions like:
+  - "how do I"
+  - "walk me through"
+  - "setup"
+  - "configure"
+  - "install"
+  - "onboard"
+  - "create account"
+- Prefer structured step-by-step responses.
+- Use numbered lists when appropriate.
+- Explain prerequisite systems, permissions, or approvals.
+- Mention dependency order when systems rely on each other.
+- Keep onboarding instructions concise and operational.
+- When useful, separate the answer into:
+  - Prerequisites
+  - Steps
+  - Troubleshooting
+  - Escalation
+- If the question is about onboarding a new employee, clearly organize the flow across systems such as Microsoft 365, groups, devices, SigmaCare, CareTracker, Paylocity, badges/access, and any other relevant systems from the available context.
+
+Escalation behavior:
+- If an issue likely requires human intervention, clearly recommend who should handle it.
+- IT issues should usually go to IT Support.
+- HR, payroll, PTO, timecard, or benefits issues should go to HR / Payroll.
+- Clinical workflow, medication, resident care, or patient-care issues should go to Nursing Leadership or the clinical supervisor.
+- Facility, building, physical equipment, door, alarm, camera, badge, or keypad issues should go to Maintenance, Security, Facilities, or IT depending on the issue.
+- If the issue sounds urgent, unsafe, or emergency-related, clearly say it should be escalated immediately.
+- When appropriate, include a short "Escalation" section with the likely team and next step.
 
 How to phrase verification:
 - When internal documents clearly support the answer, start naturally with: "Based on the St. Mary's document I found..."
@@ -150,6 +311,9 @@ ${question}
 Answer mode:
 ${answerMode}
 
+Training/onboarding mode:
+${trainingMode ? "true" : "false"}
+
 Retrieved active internal knowledge:
 ${context || "No active internal context found."}
           `.trim(),
@@ -162,6 +326,8 @@ ${context || "No active internal context found."}
       answerResult.choices[0]?.message?.content ||
       "I could not generate an answer.";
 
+    const escalation = getEscalationGuidance(question, answer);
+
     await db.query(
       `
       insert into audit_logs
@@ -173,7 +339,9 @@ ${context || "No active internal context found."}
 
     return NextResponse.json({
       success: true,
+      trainingMode,
       answer,
+      escalation,
       verification: {
         answerMode,
         usedInternalDocuments:

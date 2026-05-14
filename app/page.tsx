@@ -12,10 +12,19 @@ type Source = {
   similarity: number;
 };
 
+type Escalation = {
+  team: string | null;
+  urgency: "low" | "medium" | "high";
+  recommendedNextStep: string | null;
+  shouldEscalate: boolean;
+};
+
 type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  escalation?: Escalation;
+  trainingMode?: boolean;
   imageUrl?: string;
   imageName?: string;
 };
@@ -35,6 +44,25 @@ const STARTER_MESSAGE: Message = {
   content:
     "Hi, I’m the St. Mary’s AI Knowledge Assistant. Ask me about approved policies, SOPs, IT procedures, onboarding docs, SigmaCare, CareTracker, or SharePoint knowledge.",
 };
+
+function urgencyClass(urgency: Escalation["urgency"]) {
+  if (urgency === "high") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (urgency === "medium") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-blue-200 bg-blue-50 text-blue-700";
+}
+
+function urgencyLabel(urgency: Escalation["urgency"]) {
+  if (urgency === "high") return "High urgency";
+  if (urgency === "medium") return "Medium urgency";
+  return "Low urgency";
+}
+
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
@@ -435,6 +463,8 @@ export default function Home() {
         : `Error: ${data.error || "Something went wrong"}`;
 
       const assistantSources = data.success ? data.sources || [] : [];
+      const assistantEscalation = data.success ? data.escalation || null : null;
+      const assistantTrainingMode = data.success ? data.trainingMode || false : false;
 
       setMessages((prev) => [
         ...prev,
@@ -442,6 +472,8 @@ export default function Home() {
           role: "assistant",
           content: assistantContent,
           sources: assistantSources,
+          escalation: assistantEscalation || undefined,
+          trainingMode: assistantTrainingMode,
         },
       ]);
 
@@ -844,6 +876,57 @@ export default function Home() {
                           </button>
                         </div>
                       )}
+
+                      {message.role === "assistant" && message.trainingMode && (
+                        <div className="mt-4 rounded-2xl border border-[#dbeafe] bg-[#eff6ff] p-3">
+                          <div className="flex items-start gap-3">
+                            <div className="rounded-full bg-[#dbeafe] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1d4ed8]">
+                              Training Mode
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-semibold text-[#1e3a8a]">
+                                Step-by-step operational workflow
+                              </p>
+
+                              <p className="mt-1 text-xs leading-5 text-[#4b5563]">
+                                This response is structured for onboarding, setup, or procedural guidance.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {message.role === "assistant" &&
+                        message.escalation?.shouldEscalate && (
+                          <div className="mt-4 rounded-2xl border border-[#e5e5e5] bg-white p-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-[#666]">
+                                  Recommended Escalation
+                                </p>
+
+                                <p className="mt-1 text-sm font-semibold text-[#222]">
+                                  {message.escalation.team || "Supervisor / Leadership"}
+                                </p>
+
+                                {message.escalation.recommendedNextStep && (
+                                  <p className="mt-2 text-xs leading-5 text-[#666]">
+                                    {message.escalation.recommendedNextStep}
+                                  </p>
+                                )}
+                              </div>
+
+                              <span
+                                className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${urgencyClass(
+                                  message.escalation.urgency
+                                )}`}
+                              >
+                                {urgencyLabel(message.escalation.urgency)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
 
                       {message.role === "assistant" &&
                         message.sources &&
