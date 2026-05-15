@@ -1,6 +1,8 @@
 "use client";
 
 import { ClipboardEvent, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Source = {
   id: string;
@@ -64,6 +66,17 @@ function urgencyLabel(urgency: Escalation["urgency"]) {
 }
 
 
+function getStrongSources(sources?: Source[]) {
+  if (!sources || sources.length === 0) return [];
+
+  const sortedSources = [...sources]
+    .filter((source) => Number(source.similarity || 0) >= 0.7)
+    .sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
+
+  return sortedSources.slice(0, 4);
+}
+
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -84,13 +97,21 @@ export default function Home() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     loadConversations();
   }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }, [messages, loading]);
 
   function handleImageSelect(file: File | null) {
     setSelectedImage(file);
@@ -444,7 +465,16 @@ export default function Home() {
         return;
       }
 
-      const res = await fetch("/api/chat", {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "",
+          sources: [],
+        },
+      ]);
+
+      const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -456,26 +486,85 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
+      if (!res.ok || !res.body) {
+        throw new Error("Failed to start streaming response");
+      }
 
-      const assistantContent = data.success
-        ? data.answer
-        : `Error: ${data.error || "Something went wrong"}`;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
 
-      const assistantSources = data.success ? data.sources || [] : [];
-      const assistantEscalation = data.success ? data.escalation || null : null;
-      const assistantTrainingMode = data.success ? data.trainingMode || false : false;
+      let buffer = "";
+      let assistantContent = "";
+      let assistantSources: Source[] = [];
+      let assistantEscalation: Escalation | null = null;
+      let assistantTrainingMode = false;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: assistantContent,
-          sources: assistantSources,
-          escalation: assistantEscalation || undefined,
-          trainingMode: assistantTrainingMode,
-        },
-      ]);
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          const line = event
+            .split("\n")
+            .find((eventLine) => eventLine.startsWith("data: "));
+
+          if (!line) continue;
+
+          const payload = JSON.parse(line.replace("data: ", ""));
+
+          if (payload.type === "token") {
+            assistantContent += payload.token || "";
+
+            setMessages((prev) => {
+              const updatedMessages = [...prev];
+              const lastIndex = updatedMessages.length - 1;
+
+              if (lastIndex >= 0 && updatedMessages[lastIndex].role === "assistant") {
+                updatedMessages[lastIndex] = {
+                  ...updatedMessages[lastIndex],
+                  content: assistantContent,
+                };
+              }
+
+              return updatedMessages;
+            });
+          }
+
+          if (payload.type === "done") {
+            assistantContent = payload.answer || assistantContent;
+            assistantSources = payload.sources || [];
+            assistantEscalation = payload.escalation || null;
+            assistantTrainingMode = payload.trainingMode || false;
+
+            setMessages((prev) => {
+              const updatedMessages = [...prev];
+              const lastIndex = updatedMessages.length - 1;
+
+              if (lastIndex >= 0 && updatedMessages[lastIndex].role === "assistant") {
+                updatedMessages[lastIndex] = {
+                  ...updatedMessages[lastIndex],
+                  content: assistantContent,
+                  sources: assistantSources,
+                  escalation: assistantEscalation || undefined,
+                  trainingMode: assistantTrainingMode,
+                };
+              }
+
+              return updatedMessages;
+            });
+          }
+
+          if (payload.type === "error") {
+            throw new Error(payload.error || "Streaming failed");
+          }
+        }
+      }
 
       await saveMessage(
         conversationId,
@@ -560,6 +649,49 @@ export default function Home() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  function getSuggestionPrompts() {
+    if (selectedImage) {
+      return [
+        "Explain this screenshot",
+        "What issue do you see?",
+        "Summarize this error",
+        "What should I do next?",
+      ];
+    }
+
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "user")?.content
+      .toLowerCase();
+
+    if (lastUserMessage?.includes("printer")) {
+      return [
+        "Create a printer troubleshooting SOP",
+        "Draft an incident report",
+        "Escalate this to IT",
+        "Make this into a checklist",
+      ];
+    }
+
+    if (lastUserMessage?.includes("onboard")) {
+      return [
+        "Create onboarding checklist",
+        "Draft welcome email",
+        "List required systems",
+        "Make this a training guide",
+      ];
+    }
+
+    return [
+      "Create a printer troubleshooting SOP",
+      "Explain this screenshot",
+      "How do I onboard a user?",
+      "Draft an incident report",
+      "Create a SigmaCare access request template",
+      "Setup Outlook on iPhone",
+    ];
   }
 
   return (
@@ -712,7 +844,7 @@ export default function Home() {
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-5xl">
               {messages.length <= 1 && (
                 <div className="mb-10 mt-8 text-center">
                   <img
@@ -731,26 +863,6 @@ export default function Home() {
                     workflows, screenshots, and internal knowledge.
                   </p>
 
-                  <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-                    {[
-                      "Reset voicemail",
-                      "Explain this screenshot",
-                      "How do I onboard a user?",
-                      "CareTracker kiosk issue",
-                      "Printer troubleshooting",
-                      "SigmaCare access help",
-                      "Setup Outlook on iPhone",
-                      "SharePoint sync status",
-                    ].map((prompt) => (
-                      <button
-                        key={prompt}
-                        onClick={() => setQuestion(prompt)}
-                        className="rounded-full border border-[#d9d9d9] bg-white px-4 py-2 text-xs font-medium text-[#444] shadow-sm transition hover:bg-[#f7f7f8]"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -763,7 +875,7 @@ export default function Home() {
                     }`}
                   >
                     <div
-                      className={`max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-sm ${
+                      className={`group max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-sm ${
                         message.role === "user"
                           ? "bg-[#ececec] text-[#171717]"
                           : "bg-[#f7f7f8] text-[#171717]"
@@ -778,21 +890,25 @@ export default function Home() {
                       )}
 
                       {message.content && (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <div className="prose prose-sm max-w-none prose-neutral">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
                       )}
 
                       {message.role === "assistant" && message.content && (
-                        <div className="mt-4 flex flex-wrap gap-2">
+                        <div className="mt-3 flex flex-wrap gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                           <button
                             onClick={() => copyMessage(message.content, index)}
-                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                            className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
                           >
                             {copiedIndex === index ? "Copied" : "Copy"}
                           </button>
 
                           <button
                             onClick={() => printMessage(message)}
-                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                            className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
                           >
                             Print
                           </button>
@@ -818,7 +934,7 @@ export default function Home() {
 
                               alert("Helpful feedback saved");
                             }}
-                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                            className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
                           >
                             👍 Helpful
                           </button>
@@ -844,7 +960,7 @@ export default function Home() {
 
                               alert("Incorrect feedback saved");
                             }}
-                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                            className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
                           >
                             👎 Incorrect
                           </button>
@@ -870,7 +986,7 @@ export default function Home() {
 
                               alert("Issue reported");
                             }}
-                            className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs font-medium text-[#444] hover:bg-[#f1f1f1]"
+                            className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
                           >
                             ⚠ Report Issue
                           </button>
@@ -929,15 +1045,14 @@ export default function Home() {
                         )}
 
                       {message.role === "assistant" &&
-                        message.sources &&
-                        message.sources.length > 0 && (
+                        getStrongSources(message.sources).length > 0 && (
                           <div className="mt-4 rounded-2xl border border-[#e5e5e5] bg-white p-3">
                             <p className="mb-2 text-xs font-semibold text-[#555]">
                               Sources
                             </p>
 
                             <div className="space-y-2">
-                              {message.sources.slice(0, 4).map((source) => (
+                              {getStrongSources(message.sources).map((source) => (
                                 <div
                                   key={source.id}
                                   className="rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-3 text-xs"
@@ -980,12 +1095,14 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+
+                <div ref={messagesEndRef} />
               </div>
             </div>
           </div>
 
           <div className="shrink-0 border-t border-[#eeeeee] bg-white px-4 py-4">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-5xl">
               {imagePreviewUrl && (
                 <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-[#f7f7f8] p-3">
                   <div className="flex items-start gap-3">
@@ -1013,6 +1130,37 @@ export default function Home() {
                   </div>
                 </div>
               )}
+
+              <div className="mb-3 rounded-2xl border border-[#eeeeee] bg-white shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setSuggestionsOpen((value) => !value)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#555] hover:bg-[#fafafa]"
+                >
+                  <span>Suggestions</span>
+                  <span className={`text-xs transition-transform ${suggestionsOpen ? "rotate-180" : ""}`}>
+                    ⌄
+                  </span>
+                </button>
+
+                {suggestionsOpen && (
+                  <div className="flex flex-wrap gap-2 border-t border-[#eeeeee] px-4 pb-4 pt-3">
+                    {getSuggestionPrompts().map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => {
+                          setQuestion(prompt);
+                          setSuggestionsOpen(false);
+                        }}
+                        className="rounded-full border border-[#d9d9d9] bg-[#f7f7f8] px-3 py-1.5 text-xs font-medium text-[#444] transition hover:bg-white"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="flex items-end gap-3 rounded-2xl border border-[#d9d9d9] bg-white px-4 py-3 shadow-sm">
                 <input
@@ -1056,9 +1204,11 @@ export default function Home() {
                 <button
                   onClick={askQuestion}
                   disabled={loading || (!question.trim() && !selectedImage)}
-                  className="rounded-xl bg-[#171717] px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-[#171717] text-lg font-semibold leading-none text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Send message"
+                  title="Send"
                 >
-                  Send
+                  ↑
                 </button>
               </div>
 

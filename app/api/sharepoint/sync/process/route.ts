@@ -11,6 +11,11 @@ import { db } from "@/lib/db";
 import { openai } from "@/lib/openai";
 import { chunkText } from "@/lib/chunkText";
 import { getGraphAccessToken } from "@/lib/microsoftGraph";
+import {
+  deIdentifyText,
+  sanitizeErrorMessage,
+  sanitizeFilenameForLogs,
+} from "@/lib/phi/deidentify";
 
 export const runtime = "nodejs";
 
@@ -47,6 +52,25 @@ function safeDecodePdfText(value: string) {
   } catch {
     return value;
   }
+}
+
+function shouldBlockPossiblePhiSource(item: any) {
+  const text = `${item.item_name || ""} ${item.site_name || ""} ${item.web_url || ""}`.toLowerCase();
+
+  const blockedTerms = [
+    "clinical",
+    "preadmission",
+    "pre-admission",
+    "resident",
+    "patient",
+    "medical record",
+    "mrn",
+    "nursing",
+    "care plan",
+    "face sheet",
+  ];
+
+  return blockedTerms.some((term) => text.includes(term));
 }
 
 function extractPdfText(buffer: Buffer): Promise<string> {
@@ -146,8 +170,7 @@ async function downloadSharePointFile({
   );
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Download failed: ${res.status} ${text}`);
+    throw new Error(`Download failed with status ${res.status}`);
   }
 
   return Buffer.from(await res.arrayBuffer());
@@ -232,11 +255,47 @@ export async function POST(req: Request) {
 
     let processed = 0;
     let failed = 0;
+    let blocked = 0;
 
     const results: any[] = [];
 
     for (const item of items) {
+      const safeFileName = sanitizeFilenameForLogs(item.item_name);
+
       try {
+        if (shouldBlockPossiblePhiSource(item)) {
+          blocked++;
+
+          await db.query(
+            `
+            update sync_job_items
+            set
+              status = 'failed',
+              processed_at = now(),
+              error = $2
+            where id = $1
+            `,
+            [item.id, "Blocked by PHI source safety filter"]
+          );
+
+          await db.query(
+            `
+            update sync_jobs
+            set failed_files = failed_files + 1
+            where id = $1
+            `,
+            [item.job_id]
+          );
+
+          results.push({
+            file: safeFileName,
+            status: "blocked",
+            reason: "Blocked by PHI source safety filter",
+          });
+
+          continue;
+        }
+
         const externalId = `${item.drive_id}:${item.item_id}`;
 
         const buffer = await downloadSharePointFile({
@@ -246,19 +305,21 @@ export async function POST(req: Request) {
         });
 
         const rawText = await extractTextFromFile(buffer, item.item_name);
-        const cleanText = rawText.trim();
+
+        const { cleanText, findings } = deIdentifyText(rawText);
 
         if (!cleanText || cleanText.length < 50) {
-          throw new Error("No text extracted from file");
+          throw new Error("No safe text extracted from file");
         }
 
         const chunks = chunkText(cleanText);
 
         if (!chunks || chunks.length === 0) {
-          throw new Error("No usable chunks created from extracted text");
+          throw new Error("No usable safe chunks created from extracted text");
         }
 
         const category = guessCategory(item.item_name, item.site_name);
+        const safeTitle = sanitizeFilenameForLogs(item.item_name);
 
         const documentResult = await db.query(
           `
@@ -281,9 +342,9 @@ export async function POST(req: Request) {
           returning id
           `,
           [
-            item.item_name,
+            safeTitle,
             "sharepoint",
-            item.web_url || null,
+            null,
             category,
             externalId,
           ]
@@ -342,12 +403,15 @@ export async function POST(req: Request) {
         processed++;
 
         results.push({
-          file: item.item_name,
+          file: safeFileName,
           status: "synced",
           chunks: chunks.length,
+          phiFindingsRemoved: findings.reduce((sum, finding) => sum + finding.count, 0),
         });
       } catch (error: any) {
         failed++;
+
+        const safeError = sanitizeErrorMessage(error.message || "Failed to process file");
 
         await db.query(
           `
@@ -358,7 +422,7 @@ export async function POST(req: Request) {
             error = $2
           where id = $1
           `,
-          [item.id, error.message || "Failed to process file"]
+          [item.id, safeError]
         );
 
         await db.query(
@@ -371,9 +435,9 @@ export async function POST(req: Request) {
         );
 
         results.push({
-          file: item.item_name,
+          file: safeFileName,
           status: "failed",
-          error: error.message || "Failed to process file",
+          error: safeError,
         });
       }
     }
@@ -382,16 +446,19 @@ export async function POST(req: Request) {
       success: true,
       processed,
       failed,
+      blocked,
       durationMs: Date.now() - startedAt,
       results,
     });
   } catch (error: any) {
-    console.error("Batch sync processor error:", error);
+    const safeError = sanitizeErrorMessage(error.message || "Batch processor failed");
+
+    console.error("Batch sync processor error:", safeError);
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || "Batch processor failed",
+        error: safeError,
       },
       { status: 500 }
     );

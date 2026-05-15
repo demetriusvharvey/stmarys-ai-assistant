@@ -10,6 +10,10 @@ const SUPPORTED_EXTENSIONS = [
   ".csv",
 ];
 
+const ALLOWED_SITE_NAMES = [
+  "Communication Site",
+];
+
 function isSupportedFile(name: string) {
   const lower = name.toLowerCase();
 
@@ -194,11 +198,21 @@ export async function POST() {
     const token =
       await getGraphAccessToken();
 
-    const sites =
+    const allSites =
       await listAllGraphPages(
         "https://graph.microsoft.com/v1.0/sites?search=*",
         token
       );
+
+    const sites = allSites.filter((site) => {
+      const siteName = (
+        site.displayName ||
+        site.name ||
+        ""
+      ).trim();
+
+      return ALLOWED_SITE_NAMES.includes(siteName);
+    });
 
     const counters = {
       totalItems: 0,
@@ -298,8 +312,9 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       jobId,
+      allowedSites: ALLOWED_SITE_NAMES,
       message:
-        "SharePoint discovery completed. Files queued for sync.",
+        "Communication Site discovery completed. Files queued for sync.",
       totalSites: sites.length,
       totalItems:
         counters.totalItems,
@@ -370,6 +385,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
+      allowedSites: ALLOWED_SITE_NAMES,
       jobs: jobsResult.rows,
     });
   } catch (error: any) {

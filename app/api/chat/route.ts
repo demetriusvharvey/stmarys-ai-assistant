@@ -45,8 +45,11 @@ function getEscalationGuidance(question: string, answer: string) {
   let urgency: UrgencyLevel = "low";
   let recommendedNextStep: string | null = null;
 
-  if (
+  const isITIssue =
     combined.includes("printer") ||
+    combined.includes("print") ||
+    combined.includes("copier") ||
+    combined.includes("scanner") ||
     combined.includes("outlook") ||
     combined.includes("sharepoint") ||
     combined.includes("password") ||
@@ -58,65 +61,62 @@ function getEscalationGuidance(question: string, answer: string) {
     combined.includes("sigmacare") ||
     combined.includes("email") ||
     combined.includes("login") ||
-    combined.includes("access")
-  ) {
-    team = "IT Support";
-    recommendedNextStep =
-      "If the issue continues after basic troubleshooting, contact IT Support with the user, device, screenshot, and exact error.";
-  }
+    combined.includes("account locked") ||
+    combined.includes("access denied") ||
+    combined.includes("mapped drive") ||
+    combined.includes("network drive") ||
+    combined.includes("wifi") ||
+    combined.includes("wi-fi") ||
+    combined.includes("unifi") ||
+    combined.includes("microsoft 365") ||
+    combined.includes("office 365");
 
-  if (
+  const isHRPayrollIssue =
     combined.includes("payroll") ||
     combined.includes("paycheck") ||
     combined.includes("pto") ||
     combined.includes("timecard") ||
-    combined.includes("benefits")
-  ) {
-    team = "HR / Payroll";
-    recommendedNextStep =
-      "Escalate to HR or Payroll with the employee name, date, and specific payroll or timecard concern.";
-  }
+    combined.includes("benefits") ||
+    combined.includes("paylocity") ||
+    combined.includes("employee record");
 
-  if (
+  const isClinicalIssue =
     combined.includes("medication") ||
     combined.includes("clinical") ||
     combined.includes("resident care") ||
     combined.includes("patient") ||
     combined.includes("nursing") ||
-    combined.includes("care plan")
-  ) {
-    team = "Clinical Leadership";
-    recommendedNextStep =
-      "Escalate to nursing leadership or the appropriate clinical supervisor. Do not rely on AI for clinical decisions.";
-    urgency = "medium";
-  }
+    combined.includes("care plan") ||
+    combined.includes("treatment") ||
+    combined.includes("medical");
 
-  if (
-    combined.includes("door") ||
-    combined.includes("alarm") ||
+  const isDoorAccessOrSecuritySystem =
+    combined.includes("door access") ||
     combined.includes("badge access") ||
+    combined.includes("keypad") ||
     combined.includes("camera") ||
-    combined.includes("security") ||
-    combined.includes("keypad")
-  ) {
-    team = "Security / Facilities";
-    recommendedNextStep =
-      "Escalate to Security, Facilities, or IT depending on whether this is physical access, building equipment, or system access.";
-  }
+    combined.includes("unifi access") ||
+    combined.includes("access control");
 
-  if (
+  const isPhysicalSecurityOrSafety =
+    combined.includes("security incident") ||
+    combined.includes("intruder") ||
+    combined.includes("threat") ||
+    combined.includes("violence") ||
+    combined.includes("police");
+
+  const isFacilitiesIssue =
     combined.includes("maintenance") ||
     combined.includes("hvac") ||
     combined.includes("water leak") ||
     combined.includes("plumbing") ||
-    combined.includes("electrical")
-  ) {
-    team = "Maintenance";
-    recommendedNextStep =
-      "Escalate to Maintenance with the location, room/unit, urgency, and photos if available.";
-  }
+    combined.includes("electrical") ||
+    combined.includes("air conditioning") ||
+    combined.includes("heat not working") ||
+    combined.includes("broken toilet") ||
+    combined.includes("ceiling leak");
 
-  if (
+  const isUrgentOrEmergency =
     combined.includes("urgent") ||
     combined.includes("emergency") ||
     combined.includes("unsafe") ||
@@ -124,9 +124,55 @@ function getEscalationGuidance(question: string, answer: string) {
     combined.includes("fire") ||
     combined.includes("flood") ||
     combined.includes("injury") ||
-    combined.includes("down") ||
-    combined.includes("outage")
-  ) {
+    combined.includes("outage") ||
+    combined.includes("cannot provide care") ||
+    combined.includes("resident safety") ||
+    combined.includes("security breach");
+
+  // St. Mary's-specific ownership rules. These should override generic assumptions.
+  // Printers/copiers/scanners, Microsoft 365, SharePoint, CareTracker, SigmaCare,
+  // phones/voicemail, accounts, and access issues are IT-owned workflows.
+  if (isITIssue) {
+    team = "IT Support";
+    recommendedNextStep =
+      "Contact IT Support with the affected user, device or system name, location, screenshot, and exact error message.";
+  }
+
+  if (isDoorAccessOrSecuritySystem) {
+    team = "IT Support / Security";
+    recommendedNextStep =
+      "For door access, badge, keypad, camera, or UniFi Access issues, contact IT Support first and involve Security if it affects physical access or safety.";
+  }
+
+  if (isHRPayrollIssue) {
+    team = "HR / Payroll";
+    recommendedNextStep =
+      "Escalate to HR or Payroll with the employee name, date, and specific payroll, Paylocity, PTO, benefits, or timecard concern.";
+  }
+
+  if (isClinicalIssue) {
+    team = "Clinical Leadership";
+    recommendedNextStep =
+      "Escalate to nursing leadership or the appropriate clinical supervisor. Do not rely on AI for clinical decisions.";
+    urgency = "medium";
+  }
+
+  if (isPhysicalSecurityOrSafety) {
+    team = "Security / Leadership";
+    recommendedNextStep =
+      "Escalate immediately to Security and leadership for safety or security-related incidents.";
+    urgency = "high";
+  }
+
+  // Facilities should only win when this is clearly a building/equipment issue,
+  // not an IT-owned device like a printer/copier/scanner.
+  if (isFacilitiesIssue && !isITIssue && !isDoorAccessOrSecuritySystem) {
+    team = "Maintenance";
+    recommendedNextStep =
+      "Escalate to Maintenance with the location, room/unit, urgency, and photos if available.";
+  }
+
+  if (isUrgentOrEmergency) {
     urgency = "high";
   }
 
@@ -161,6 +207,28 @@ function isTrainingOrOnboardingRequest(question: string) {
     lowerQuestion.includes("steps") ||
     lowerQuestion.includes("procedure") ||
     lowerQuestion.includes("process")
+  );
+}
+
+function isDocumentationAssistantRequest(question: string) {
+  const lowerQuestion = question.toLowerCase();
+
+  return (
+    lowerQuestion.includes("write") ||
+    lowerQuestion.includes("draft") ||
+    lowerQuestion.includes("create a form") ||
+    lowerQuestion.includes("create an sop") ||
+    lowerQuestion.includes("generate") ||
+    lowerQuestion.includes("incident report") ||
+    lowerQuestion.includes("checklist") ||
+    lowerQuestion.includes("template") ||
+    lowerQuestion.includes("documentation") ||
+    lowerQuestion.includes("document this") ||
+    lowerQuestion.includes("make a policy") ||
+    lowerQuestion.includes("make an sop") ||
+    lowerQuestion.includes("request form") ||
+    lowerQuestion.includes("troubleshooting guide") ||
+    lowerQuestion.includes("professional email")
   );
 }
 
@@ -226,6 +294,7 @@ export async function POST(req: NextRequest) {
     const topSimilarity = Number(matches.rows[0]?.similarity || 0);
     const answerMode = getAnswerMode(topSimilarity);
     const trainingMode = isTrainingOrOnboardingRequest(question);
+    const documentationMode = isDocumentationAssistantRequest(question);
 
     const context = matches.rows
       .map((row: any, index: number) => {
@@ -284,12 +353,33 @@ Training and onboarding behavior:
   - Escalation
 - If the question is about onboarding a new employee, clearly organize the flow across systems such as Microsoft 365, groups, devices, SigmaCare, CareTracker, Paylocity, badges/access, and any other relevant systems from the available context.
 
+
+Documentation assistant behavior:
+- Help create professional operational documentation.
+- Examples include:
+  - SOPs
+  - onboarding checklists
+  - incident reports
+  - troubleshooting guides
+  - email templates
+  - request forms
+  - operational procedures
+- Prefer clean formatting with sections and headings.
+- Use concise enterprise/professional wording.
+- Keep outputs practical and realistic for internal operations.
+- When drafting documentation, avoid inventing St. Mary's official policy details.
+- If internal documents support the draft, use them as the base.
+- If the user is asking for a draft or template, make it editable and ready to copy.
+- When helpful, include placeholders like [Name], [Date], [Department], [System], or [Issue].
+
 Escalation behavior:
 - If an issue likely requires human intervention, clearly recommend who should handle it.
-- IT issues should usually go to IT Support.
-- HR, payroll, PTO, timecard, or benefits issues should go to HR / Payroll.
+- St. Mary's ownership rules matter more than generic assumptions.
+- Printer, copier, scanner, Outlook, SharePoint, Microsoft 365, Teams, password, login, voicemail, CareTracker, SigmaCare, network drive, and device issues should go to IT Support.
+- Door access, keypad, camera, UniFi Access, and badge issues should usually start with IT Support and may involve Security if physical access or safety is impacted.
+- HR, payroll, PTO, Paylocity, timecard, or benefits issues should go to HR / Payroll.
 - Clinical workflow, medication, resident care, or patient-care issues should go to Nursing Leadership or the clinical supervisor.
-- Facility, building, physical equipment, door, alarm, camera, badge, or keypad issues should go to Maintenance, Security, Facilities, or IT depending on the issue.
+- Building, HVAC, plumbing, electrical, water leak, and facilities issues should go to Maintenance.
 - If the issue sounds urgent, unsafe, or emergency-related, clearly say it should be escalated immediately.
 - When appropriate, include a short "Escalation" section with the likely team and next step.
 
@@ -313,6 +403,9 @@ ${answerMode}
 
 Training/onboarding mode:
 ${trainingMode ? "true" : "false"}
+
+Documentation assistant mode:
+${documentationMode ? "true" : "false"}
 
 Retrieved active internal knowledge:
 ${context || "No active internal context found."}
@@ -340,6 +433,7 @@ ${context || "No active internal context found."}
     return NextResponse.json({
       success: true,
       trainingMode,
+      documentationMode,
       answer,
       escalation,
       verification: {
