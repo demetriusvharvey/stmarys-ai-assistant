@@ -232,6 +232,42 @@ function isDocumentationAssistantRequest(question: string) {
   );
 }
 
+function isMetaQuestion(question: string): boolean {
+  const q = question.toLowerCase().trim();
+  return (
+    q.includes("what agents") ||
+    q.includes("which agents") ||
+    q.includes("what can you do") ||
+    q.includes("what do you do") ||
+    q.includes("what are you") ||
+    q.includes("who are you") ||
+    q.includes("who works here") ||
+    q.includes("what tools do you") ||
+    (q.includes("agents") && (q.includes("available") || q.includes("have") || q.includes("got"))) ||
+    q === "help" ||
+    q === "capabilities" ||
+    q.includes("your capabilities") ||
+    q.includes("what workforce")
+  );
+}
+
+function getMetaAnswer(): string {
+  return `St. Mary\'s AI Workforce currently has **5 specialized agents**:
+
+- 📋 **Policy Agent** — answers questions about policies, SOPs, procedures, and internal processes.
+- 👥 **HR Agent** — helps draft onboarding checklists, orientation materials, and staff communications.
+- 🖥 **IT Support Agent** — helps troubleshoot printers, passwords, Outlook, Teams, SharePoint, CareTracker, SigmaCare, and hardware.
+- 📊 **Executive Agent** — prepares leadership summaries, operational overviews, risks, and recommendations.
+- 🏥 **Medical Education Agent** — provides general health education only. It does not provide diagnosis, treatment, or resident-specific advice.
+
+**Example requests**
+
+- "Summarize the attendance policy"
+- "Create a new nurse onboarding checklist"
+- "Troubleshoot a SigmaCare login issue"
+- "What are signs of dehydration?"`;
+}
+
 function sendEvent(controller: ReadableStreamDefaultController, data: unknown) {
   const encoder = new TextEncoder();
 
@@ -299,6 +335,23 @@ export async function POST(req: NextRequest) {
           sendEvent(controller, {
             type: "error",
             error: "question is required",
+          });
+          controller.close();
+          return;
+        }
+
+        if (isMetaQuestion(question)) {
+          const metaAnswer = getMetaAnswer();
+          streamText(controller, metaAnswer);
+          sendEvent(controller, {
+            type: "done",
+            answer: metaAnswer,
+            trainingMode: false,
+            documentationMode: false,
+            escalation: { team: null, urgency: "low", recommendedNextStep: null, shouldEscalate: false },
+            verification: { answerMode: "general_guidance", usedInternalDocuments: false, isGeneralGuidance: true, usedConversationHistory: 0 },
+            selectedAgent: getSelectedAgentMetadata("internal_knowledge", "meta_question"),
+            sources: [],
           });
           controller.close();
           return;
@@ -455,11 +508,7 @@ export async function POST(req: NextRequest) {
           documentationMode,
           itTroubleshootingMode,
         });
-        const answerPrefix =
-          `## ${answerLabel}\n\n` +
-          (answerMode !== "internal_document_supported"
-            ? "No approved internal source found. This is generated guidance, not an approved St. Mary's policy.\n\n"
-            : "");
+        const answerPrefix = `## ${answerLabel}\n\n`;
 
         const context = matches.rows
           .map((row: any, index: number) => {
