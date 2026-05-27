@@ -52,19 +52,38 @@ function normalizeCategory(doc: DocumentItem) {
 export default function KnowledgePage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
   async function loadDocuments() {
     try {
       const res = await fetch("/api/documents");
+      const contentType = res.headers.get("content-type") || "";
+
+      if (!contentType.includes("application/json")) {
+        setLoadError(
+          "Unable to load the Knowledge Library. Admin access may be required."
+        );
+        return;
+      }
+
       const data = await res.json();
+
+      if (!res.ok) {
+        setLoadError(data.error || "Unable to load the Knowledge Library.");
+        return;
+      }
 
       if (data.success) {
         setDocuments(data.documents || []);
+        setLoadError(null);
+      } else {
+        setLoadError(data.error || "Unable to load the Knowledge Library.");
       }
     } catch (error) {
       console.error(error);
+      setLoadError("Unable to load the Knowledge Library.");
     } finally {
       setLoading(false);
     }
@@ -212,13 +231,19 @@ export default function KnowledgePage() {
                 </div>
               )}
 
-              {!loading && filteredDocs.length === 0 && (
+              {!loading && loadError && (
+                <div className="rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-6 text-sm text-[#666]">
+                  {loadError}
+                </div>
+              )}
+
+              {!loading && !loadError && filteredDocs.length === 0 && (
                 <div className="rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-6 text-sm text-[#666]">
                   No documents found.
                 </div>
               )}
 
-              <div className="grid gap-3">
+              {!loadError && <div className="grid gap-3">
                 {filteredDocs.map((doc) => (
                   <div
                     key={doc.id}
@@ -262,7 +287,7 @@ export default function KnowledgePage() {
                     </div>
                   </div>
                 ))}
-              </div>
+              </div>}
             </div>
           </div>
         </section>

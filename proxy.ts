@@ -25,6 +25,10 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname === "/api/documents" && req.method === "GET") {
+    return NextResponse.next();
+  }
+
   const isPublic = PUBLIC_ROUTES.some((route) =>
     pathname.startsWith(route)
   );
