@@ -21,6 +21,13 @@ type Escalation = {
   shouldEscalate: boolean;
 };
 
+type SelectedAgent = {
+  name: string;
+  displayName: string;
+  icon: string;
+  reason?: string;
+};
+
 type Message = {
   role: "user" | "assistant";
   content: string;
@@ -29,7 +36,7 @@ type Message = {
   trainingMode?: boolean;
   imageUrl?: string;
   imageName?: string;
-  agentLabel?: string;
+  selectedAgent?: SelectedAgent;
 };
 
 type Conversation = {
@@ -83,81 +90,6 @@ function getStrongSources(sources?: Source[]) {
 
   return sortedSources.slice(0, 4);
 }
-
-function getAgentLabel(question: string) {
-  const value = question.toLowerCase();
-
-  if (
-    value.includes("sigmacare") ||
-    value.includes("caretracker") ||
-    value.includes("microsoft 365") ||
-    value.includes("office 365") ||
-    value.includes("outlook") ||
-    value.includes("teams") ||
-    value.includes("sharepoint") ||
-    value.includes("printer") ||
-    value.includes("scanner") ||
-    value.includes("copier") ||
-    value.includes("password") ||
-    value.includes("login") ||
-    value.includes("unifi") ||
-    value.includes("troubleshoot")
-  ) {
-    return "🖥 IT Support Agent";
-  }
-
-  if (
-    value.includes("executive") ||
-    value.includes("leadership") ||
-    value.includes("ceo") ||
-    value.includes("cfo") ||
-    value.includes("board")
-  ) {
-    return "📊 Executive Agent";
-  }
-
-  if (
-    value.includes("hr") ||
-    value.includes("human resources") ||
-    value.includes("payroll") ||
-    value.includes("pto") ||
-    value.includes("benefits") ||
-    value.includes("onboarding") ||
-    value.includes("new hire")
-  ) {
-    return "👥 HR Agent";
-  }
-
-  if (
-    value.includes("medical education") ||
-    value.includes("health education") ||
-    value.includes("cdc") ||
-    value.includes("medline") ||
-    value.includes("symptom") ||
-    value.includes("clinical education")
-  ) {
-    return "🏥 Medical Education Agent";
-  }
-
-  return "📋 Policy Agent";
-}
-
-function getRenderedAgentLabel(messages: Message[], index: number) {
-  const message = messages[index];
-
-  if (message.role !== "assistant") return null;
-  if (message.agentLabel) return message.agentLabel;
-
-  const previousUserMessage = [...messages]
-    .slice(0, index)
-    .reverse()
-    .find((item) => item.role === "user");
-
-  return previousUserMessage?.content
-    ? getAgentLabel(previousUserMessage.content)
-    : null;
-}
-
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
@@ -479,7 +411,6 @@ export default function Home() {
       const currentQuestion = question.trim();
       const imageFile = selectedImage;
       const currentImagePreviewUrl = imagePreviewUrl;
-      const currentAgentLabel = getAgentLabel(currentQuestion);
 
       const userContent = currentQuestion || "";
 
@@ -530,7 +461,7 @@ export default function Home() {
             role: "assistant",
             content: assistantContent,
             sources: assistantSources,
-            agentLabel: currentAgentLabel,
+            selectedAgent: data.success ? data.selectedAgent : undefined,
           },
         ]);
 
@@ -550,7 +481,6 @@ export default function Home() {
           role: "assistant",
           content: "",
           sources: [],
-          agentLabel: currentAgentLabel,
         },
       ]);
 
@@ -633,6 +563,7 @@ export default function Home() {
                   sources: assistantSources,
                   escalation: assistantEscalation || undefined,
                   trainingMode: assistantTrainingMode,
+                  selectedAgent: payload.selectedAgent,
                 };
               }
 
@@ -907,12 +838,20 @@ export default function Home() {
                         </div>
                       )}
 
-                      {message.role === "assistant" &&
-                        getRenderedAgentLabel(messages, index) && (
-                          <div className="mt-3 inline-flex rounded-full bg-[#f1f5f9] px-3 py-1 text-[11px] font-medium text-[#475569]">
-                            {getRenderedAgentLabel(messages, index)}
+                      {message.role === "assistant" && message.selectedAgent && (
+                          <div className="mt-3 inline-flex flex-col rounded-2xl bg-[#f1f5f9] px-3 py-2 text-[11px] font-medium text-[#475569]">
+                            <span>
+                              {message.selectedAgent.icon}{" "}
+                              {message.selectedAgent.displayName}
+                            </span>
+
+                            {message.selectedAgent.reason && (
+                              <span className="mt-0.5 font-normal text-[#64748b]">
+                                Reason: {message.selectedAgent.reason}
+                              </span>
+                            )}
                           </div>
-                        )}
+                      )}
 
                       {message.role === "assistant" && message.content && (
                         <div className="mt-3 flex flex-wrap gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">

@@ -250,6 +250,39 @@ function streamText(controller: ReadableStreamDefaultController, answer: string)
   }
 }
 
+function getSelectedAgentMetadata(agentName: string, reason?: string) {
+  const agents: Record<string, { displayName: string; icon: string }> = {
+    internal_knowledge: {
+      displayName: "Policy Agent",
+      icon: "📋",
+    },
+    it_support: {
+      displayName: "IT Support Agent",
+      icon: "🖥",
+    },
+    document_assistant: {
+      displayName: "HR Agent",
+      icon: "👥",
+    },
+    medical_education: {
+      displayName: "Medical Education Agent",
+      icon: "🏥",
+    },
+    executive: {
+      displayName: "Executive Agent",
+      icon: "📊",
+    },
+  };
+  const agent = agents[agentName] || agents.internal_knowledge;
+
+  return {
+    name: agentName,
+    displayName: agent.displayName,
+    icon: agent.icon,
+    reason,
+  };
+}
+
 export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
@@ -337,6 +370,10 @@ export async function POST(req: NextRequest) {
                   isGeneralGuidance: true,
                   usedConversationHistory: 0,
                 },
+                selectedAgent: getSelectedAgentMetadata(
+                  routeDecision.agent,
+                  routeDecision.reason
+                ),
                 sources: [],
               });
 
@@ -557,6 +594,10 @@ ${context || "No active internal context found."}
             isGeneralGuidance: answerMode === "general_guidance",
             usedConversationHistory: conversationHistory.length,
           },
+          selectedAgent: getSelectedAgentMetadata(
+            routeDecision.agent,
+            routeDecision.reason
+          ),
           sources: matches.rows.map((row: any) => ({
             id: row.id,
             documentId: row.document_id,

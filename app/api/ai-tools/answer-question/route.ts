@@ -7,6 +7,39 @@ import { writeAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
+function getSelectedAgentMetadata(agentName: string, reason?: string) {
+  const agents: Record<string, { displayName: string; icon: string }> = {
+    internal_knowledge: {
+      displayName: "Policy Agent",
+      icon: "📋",
+    },
+    it_support: {
+      displayName: "IT Support Agent",
+      icon: "🖥",
+    },
+    document_assistant: {
+      displayName: "HR Agent",
+      icon: "👥",
+    },
+    medical_education: {
+      displayName: "Medical Education Agent",
+      icon: "🏥",
+    },
+    executive: {
+      displayName: "Executive Agent",
+      icon: "📊",
+    },
+  };
+  const agent = agents[agentName] || agents.internal_knowledge;
+
+  return {
+    name: agentName,
+    displayName: agent.displayName,
+    icon: agent.icon,
+    reason,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -106,6 +139,10 @@ export async function POST(req: Request) {
           hasStrongInternalMatch: false,
           hasPossibleInternalMatch: false,
         },
+        selectedAgent: getSelectedAgentMetadata(
+          routeDecision.agent,
+          routeDecision.reason
+        ),
         sources: [],
       });
     }
@@ -155,6 +192,10 @@ export async function POST(req: Request) {
         hasStrongInternalMatch,
         hasPossibleInternalMatch,
       },
+      selectedAgent: getSelectedAgentMetadata(
+        routeDecision.agent,
+        routeDecision.reason
+      ),
       sources: result.sources.map((source) => ({
         chunkId: source.id,
         documentId: source.documentId,
