@@ -98,15 +98,9 @@ export default function Home() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
-  const [uploading, setUploading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [category, setCategory] = useState("IT");
-  const [uploadStatus, setUploadStatus] = useState("");
-  const [syncStatus, setSyncStatus] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -592,72 +586,6 @@ export default function Home() {
     }
   }
 
-  async function uploadPdf() {
-    const file = fileInputRef.current?.files?.[0];
-
-    if (!file) {
-      setUploadStatus("Please select a PDF.");
-      return;
-    }
-
-    setUploading(true);
-    setUploadStatus("Processing document...");
-
-    try {
-      const formData = new FormData();
-
-      formData.append("file", file);
-      formData.append("category", category);
-      formData.append("source", "Manual Upload");
-
-      const res = await fetch("/api/ingest-pdf", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setUploadStatus(
-          `Uploaded ${data.fileName} · ${data.chunksStored} chunks · ${data.extractionMethod}`
-        );
-
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-      } else {
-        setUploadStatus(`Error: ${data.error}`);
-      }
-    } catch (error: any) {
-      setUploadStatus(`Error: ${error.message}`);
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function syncSharePoint() {
-    setSyncing(true);
-    setSyncStatus("Creating SharePoint sync job...");
-
-    try {
-      const res = await fetch("/api/sharepoint/sync/jobs", {
-        method: "POST",
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setSyncStatus("Sync job created. Open Sync Admin to process queued files.");
-      } else {
-        setSyncStatus(`Error: ${data.error}`);
-      }
-    } catch (error: any) {
-      setSyncStatus(`Error: ${error.message}`);
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   function getSuggestionPrompts() {
     if (selectedImage) {
       return [
@@ -723,51 +651,24 @@ export default function Home() {
             >
               Knowledge Library
             </a>
-
-            <a
-              href="/admin/sync"
-              className="block rounded-xl px-3 py-2.5 font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm"
-            >
-              Sync Admin
-            </a>
-
-            <button
-              onClick={syncSharePoint}
-              disabled={syncing}
-              className="w-full rounded-xl px-3 py-2.5 text-left font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm disabled:opacity-50"
-            >
-              {syncing ? "Creating Sync Job..." : "Queue SharePoint Sync"}
-            </button>
           </nav>
 
-          {syncStatus && (
-            <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs leading-5 text-[#475569] shadow-sm">
-              {syncStatus}
-            </div>
-          )}
-
           <div className="mt-6 min-h-0">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
+            <div className="mb-2 px-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94a3b8]">
                 Recent chats
               </p>
-
-              {conversations.length > 0 && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
-                  {conversations.length}
-                </span>
-              )}
             </div>
 
-            <div className="max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
+            <div className="max-h-80 space-y-0.5 overflow-y-auto pr-1 text-sm">
               {loadingChats && (
-                <p className="rounded-xl px-3 py-2 text-xs text-[#64748b]">
+                <p className="px-2 py-2 text-xs text-[#94a3b8]">
                   Loading chats...
                 </p>
               )}
 
               {!loadingChats && conversations.length === 0 && (
-                <p className="rounded-xl border border-dashed border-[#cbd5e1] bg-white/70 px-3 py-3 text-xs leading-5 text-[#64748b]">
+                <p className="px-2 py-2 text-xs leading-5 text-[#94a3b8]">
                   No saved chats yet.
                 </p>
               )}
@@ -776,14 +677,14 @@ export default function Home() {
                 <button
                   key={conversation.id}
                   onClick={() => loadConversation(conversation.id)}
-                  className={`w-full rounded-xl px-3 py-2.5 text-left transition ${
+                  className={`w-full rounded-lg px-2.5 py-2 text-left transition ${
                     activeConversationId === conversation.id
-                      ? "bg-white text-[#111827] shadow-sm ring-1 ring-[#cbd5e1]"
-                      : "text-[#475569] hover:bg-white hover:text-[#111827] hover:shadow-sm"
+                      ? "bg-[#e2e8f0] text-[#111827]"
+                      : "text-[#64748b] hover:bg-[#edf2f7] hover:text-[#111827]"
                   }`}
                   title={conversation.title}
                 >
-                  <span className="line-clamp-2 text-sm font-medium leading-5">
+                  <span className="line-clamp-1 text-[13px] font-medium leading-5">
                     {conversation.title || "New Chat"}
                   </span>
                 </button>
@@ -792,47 +693,12 @@ export default function Home() {
           </div>
 
           <div className="mt-auto space-y-3 pt-4">
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
-              <p className="text-xs font-semibold text-[#111827]">Manual Upload</p>
-
-              <div className="mt-3 space-y-3">
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-xs outline-none focus:border-[#94a3b8]"
-                >
-                  <option>IT</option>
-                  <option>Onboarding</option>
-                  <option>SigmaCare</option>
-                  <option>CareTracker</option>
-                  <option>Policies</option>
-                  <option>Training</option>
-                </select>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  className="w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-[#0f766e] file:px-2 file:py-1.5 file:text-xs file:text-white"
-                />
-
-                <button
-                  onClick={uploadPdf}
-                  disabled={uploading}
-                  className="w-full rounded-xl bg-[#0f766e] px-3 py-2 text-xs font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
-                >
-                  {uploading ? "Uploading..." : "Upload PDF"}
-                </button>
-
-                {uploadStatus && (
-                  <p className="text-xs leading-5 text-[#666]">{uploadStatus}</p>
-                )}
-              </div>
-            </div>
-
             <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 text-xs leading-5 text-[#64748b] shadow-sm">
-              <p className="font-semibold text-[#111827]">Safety Rules</p>
-              <p>Read-only · No medical advice · Source-based answers</p>
+              <p className="font-semibold text-[#111827]">Document Sources</p>
+              <p>
+                Documents should be added through SharePoint and synced by
+                authorized users.
+              </p>
             </div>
           </div>
         </aside>
@@ -842,13 +708,6 @@ export default function Home() {
             <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
 
             <div className="flex items-center gap-2">
-              <a
-                href="/admin/sync"
-                className="rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm font-medium text-[#475569]"
-              >
-                Sync
-              </a>
-
               <button
                 onClick={newChat}
                 className="rounded-xl bg-[#0f766e] px-3 py-2 text-sm font-semibold text-white"
