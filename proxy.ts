@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifyAdminSessionToken } from "@/lib/adminSession";
 
 const PROTECTED_PREFIXES = [
   "/admin",
+  "/api/ai-tools",
+  "/api/sharepoint/sync",
   "/api/sharepoint",
   "/api/ingest",
   "/api/ingest-pdf",
@@ -15,8 +18,12 @@ const PUBLIC_ROUTES = [
   "/api/admin/login",
 ];
 
-export function proxy(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  if (pathname === "/api/feedback" && req.method === "POST") {
+    return NextResponse.next();
+  }
 
   const isPublic = PUBLIC_ROUTES.some((route) =>
     pathname.startsWith(route)
@@ -50,7 +57,17 @@ export function proxy(req: NextRequest) {
     );
   }
 
-  if (sessionCookie === adminSecret) {
+  const authHeader = req.headers.get("authorization") || "";
+  const bearerToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : null;
+  const internalSecretHeader = req.headers.get("x-internal-admin-secret");
+
+  const hasValidSession = sessionCookie
+    ? await verifyAdminSessionToken(sessionCookie, adminSecret)
+    : false;
+
+  if (hasValidSession || bearerToken === adminSecret || internalSecretHeader === adminSecret) {
     return NextResponse.next();
   }
 
