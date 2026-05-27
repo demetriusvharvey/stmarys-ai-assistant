@@ -27,6 +27,12 @@ type GraphDriveItem = {
   folder?: unknown;
 };
 
+type SharePointDocumentRow = {
+  id: string;
+  title: string;
+  external_id: string;
+};
+
 const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt"];
 
 function isSupportedFile(name: string) {
@@ -165,7 +171,9 @@ export async function POST() {
       `
     );
 
-    const missingDocs = activeSharePointDocs.rows.filter(
+    const activeDocs = activeSharePointDocs.rows as SharePointDocumentRow[];
+
+    const missingDocs = activeDocs.filter(
       (doc) => !currentExternalIds.has(doc.external_id)
     );
 
@@ -192,7 +200,7 @@ export async function POST() {
       skippedSites,
       skippedDrives,
       currentSupportedFiles,
-      activeSharePointDocumentsInDatabase: activeSharePointDocs.rows.length,
+      activeSharePointDocumentsInDatabase: activeDocs.length,
       archivedMissingDocuments: missingDocs.length,
       archivedPreview: missingDocs.slice(0, 25).map((doc) => ({
         id: doc.id,

@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    "stmarys-teams-bot/lib/**",
+    "mcp-server/dist/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

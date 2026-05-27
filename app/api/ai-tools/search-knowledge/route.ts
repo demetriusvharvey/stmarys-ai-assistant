@@ -4,6 +4,19 @@ import { openai } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
+type SearchKnowledgeRow = {
+  chunk_id: string;
+  document_id: string;
+  content: string;
+  chunk_index: number | null;
+  title: string;
+  category: string;
+  source: string;
+  source_url: string | null;
+  external_id: string | null;
+  similarity: number | string;
+};
+
 function vectorToSql(vector: number[]) {
   return `[${vector.join(",")}]`;
 }
@@ -51,19 +64,22 @@ export async function POST(req: Request) {
       join documents d
         on d.id = dc.document_id
       where
-        ($3::text is null or d.category = $3)
+        d.is_active = true
+        and ($3::text is null or d.category = $3)
       order by dc.embedding <=> $1::vector
       limit $2
       `,
       [vector, limit, category]
     );
 
+    const rows = result.rows as SearchKnowledgeRow[];
+
     return NextResponse.json({
       success: true,
       query,
       category,
-      count: result.rows.length,
-      results: result.rows.map((row) => ({
+      count: rows.length,
+      results: rows.map((row) => ({
         chunkId: row.chunk_id,
         documentId: row.document_id,
         title: row.title,

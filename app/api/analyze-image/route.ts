@@ -11,6 +11,19 @@ type StoredMessage = {
   content: string;
 };
 
+type SearchChunk = {
+  chunk_id: string;
+  document_id: string;
+  content: string;
+  chunk_index: number | null;
+  title: string;
+  category: string;
+  source: string;
+  source_url: string | null;
+  external_id: string | null;
+  similarity: number | string;
+};
+
 function vectorToSql(vector: number[]) {
   return `[${vector.join(",")}]`;
 }
@@ -144,7 +157,7 @@ Return a concise image summary useful for searching internal St. Mary's document
       [vector]
     );
 
-    const chunks = searchResult.rows;
+    const chunks = searchResult.rows as SearchChunk[];
 
     const context = chunks
       .map(

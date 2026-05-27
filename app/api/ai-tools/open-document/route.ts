@@ -3,6 +3,13 @@ import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 
+type DocumentChunk = {
+  id: string;
+  chunk_index: number | null;
+  content: string;
+  created_at: string;
+};
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -59,13 +66,14 @@ export async function GET(req: Request) {
       `,
       [documentId]
     );
+    const chunks = chunkResult.rows as DocumentChunk[];
 
     return NextResponse.json({
       success: true,
       document: docResult.rows[0],
-      chunkCount: chunkResult.rows.length,
-      chunks: chunkResult.rows,
-      fullText: chunkResult.rows
+      chunkCount: chunks.length,
+      chunks,
+      fullText: chunks
         .map((chunk) => chunk.content)
         .join("\n\n"),
     });
