@@ -29,6 +29,7 @@ type Message = {
   trainingMode?: boolean;
   imageUrl?: string;
   imageName?: string;
+  agentLabel?: string;
 };
 
 type Conversation = {
@@ -44,7 +45,7 @@ const LOGO_URL =
 const STARTER_MESSAGE: Message = {
   role: "assistant",
   content:
-    "Hi, I’m the St. Mary’s AI Knowledge Assistant. Ask me about approved policies, SOPs, IT procedures, onboarding docs, SigmaCare, CareTracker, or SharePoint knowledge.",
+    "Hi, I’m St. Mary’s AI Workforce. I orchestrate specialized AI agents to help staff search approved knowledge, troubleshoot operational issues, draft documents, and support teams.",
 };
 
 const EMPTY_STATE_PROMPTS = [
@@ -83,6 +84,80 @@ function getStrongSources(sources?: Source[]) {
   return sortedSources.slice(0, 4);
 }
 
+function getAgentLabel(question: string) {
+  const value = question.toLowerCase();
+
+  if (
+    value.includes("sigmacare") ||
+    value.includes("caretracker") ||
+    value.includes("microsoft 365") ||
+    value.includes("office 365") ||
+    value.includes("outlook") ||
+    value.includes("teams") ||
+    value.includes("sharepoint") ||
+    value.includes("printer") ||
+    value.includes("scanner") ||
+    value.includes("copier") ||
+    value.includes("password") ||
+    value.includes("login") ||
+    value.includes("unifi") ||
+    value.includes("troubleshoot")
+  ) {
+    return "🖥 IT Support Agent";
+  }
+
+  if (
+    value.includes("executive") ||
+    value.includes("leadership") ||
+    value.includes("ceo") ||
+    value.includes("cfo") ||
+    value.includes("board")
+  ) {
+    return "📊 Executive Agent";
+  }
+
+  if (
+    value.includes("hr") ||
+    value.includes("human resources") ||
+    value.includes("payroll") ||
+    value.includes("pto") ||
+    value.includes("benefits") ||
+    value.includes("onboarding") ||
+    value.includes("new hire")
+  ) {
+    return "👥 HR Agent";
+  }
+
+  if (
+    value.includes("medical education") ||
+    value.includes("health education") ||
+    value.includes("cdc") ||
+    value.includes("medline") ||
+    value.includes("symptom") ||
+    value.includes("clinical education")
+  ) {
+    return "🏥 Medical Education Agent";
+  }
+
+  return "📋 Policy Agent";
+}
+
+function getRenderedAgentLabel(messages: Message[], index: number) {
+  const message = messages[index];
+
+  if (message.role !== "assistant") return null;
+  if (message.agentLabel) return message.agentLabel;
+
+  const previousUserMessage = [...messages]
+    .slice(0, index)
+    .reverse()
+    .find((item) => item.role === "user");
+
+  return previousUserMessage?.content
+    ? getAgentLabel(previousUserMessage.content)
+    : null;
+}
+
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
@@ -100,6 +175,7 @@ export default function Home() {
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -199,7 +275,7 @@ export default function Home() {
       <!doctype html>
       <html>
         <head>
-          <title>St. Mary's AI Assistant Response</title>
+          <title>St. Mary's AI Workforce Response</title>
           <style>
             body {
               font-family: Arial, sans-serif;
@@ -243,7 +319,7 @@ export default function Home() {
         </head>
         <body>
           <div class="header">
-            <h1>St. Mary's AI Assistant Response</h1>
+            <h1>St. Mary's AI Workforce Response</h1>
           </div>
 
           <div class="content">${safeContent}</div>
@@ -337,7 +413,7 @@ export default function Home() {
         {
           role: "assistant",
           content:
-            "Hi, I’m the St. Mary’s AI Knowledge Assistant. What would you like to know?",
+            "Hi, I’m St. Mary’s AI Workforce. Which specialized agent should I route your work to today?",
         },
       ]);
       setQuestion("");
@@ -403,6 +479,7 @@ export default function Home() {
       const currentQuestion = question.trim();
       const imageFile = selectedImage;
       const currentImagePreviewUrl = imagePreviewUrl;
+      const currentAgentLabel = getAgentLabel(currentQuestion);
 
       const userContent = currentQuestion || "";
 
@@ -453,6 +530,7 @@ export default function Home() {
             role: "assistant",
             content: assistantContent,
             sources: assistantSources,
+            agentLabel: currentAgentLabel,
           },
         ]);
 
@@ -472,6 +550,7 @@ export default function Home() {
           role: "assistant",
           content: "",
           sources: [],
+          agentLabel: currentAgentLabel,
         },
       ]);
 
@@ -623,51 +702,90 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#f6f7f8] text-[#171717]">
-      <div className="grid h-screen grid-cols-1 overflow-hidden md:grid-cols-[300px_1fr]">
-        <aside className="hidden h-screen overflow-y-auto border-r border-[#e5e7eb] bg-[#f8fafc] p-4 md:flex md:flex-col">
-          <div className="mb-4 rounded-2xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
-            <img src={LOGO_URL} alt="St. Mary's Home" className="h-12 w-auto" />
+    <main className="h-screen overflow-hidden bg-[#fbfbfa] text-[#171717]">
+      <div className="flex h-screen overflow-hidden">
+        <aside
+          className={`hidden h-screen shrink-0 overflow-hidden border-r border-[#ececec] bg-[#f7f7f7] transition-[width] duration-300 ease-in-out md:flex md:flex-col ${
+            sidebarCollapsed ? "w-[72px]" : "w-[244px]"
+          }`}
+        >
+          <div className="flex h-14 items-center justify-between px-3">
+            {sidebarCollapsed ? (
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-semibold text-[#0f766e] shadow-sm">
+                SM
+              </div>
+            ) : (
+              <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
+            )}
+
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((value) => !value)}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold text-[#64748b] transition hover:bg-white hover:text-[#111827]"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? ">" : "<"}
+            </button>
           </div>
 
           <button
             onClick={newChat}
-            className="mb-4 flex w-full items-center justify-between rounded-2xl bg-[#0f766e] px-4 py-3 text-left text-sm font-semibold text-white shadow-sm transition hover:bg-[#115e59]"
+            className={`mx-2 mt-1 flex h-10 items-center rounded-lg text-sm font-medium text-[#111827] transition hover:bg-white ${
+              sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+            }`}
+            title="New chat"
           >
-            <span>New chat</span>
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-base leading-none">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#d9d9d9] bg-white text-base leading-none">
               +
             </span>
+            {!sidebarCollapsed && <span>New chat</span>}
           </button>
 
-          <nav className="space-y-1 text-sm">
-            <button className="w-full rounded-xl bg-white px-3 py-2.5 text-left font-semibold text-[#111827] shadow-sm ring-1 ring-[#e5e7eb]">
-              AI Knowledge Chat
+          <nav className="mt-2 space-y-0.5 px-2 text-sm">
+            <button
+              className={`flex h-10 w-full items-center rounded-lg bg-[#e8ecef] font-medium text-[#111827] ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3 text-left"
+              }`}
+              title="AI Workforce"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
+                C
+              </span>
+              {!sidebarCollapsed && <span>AI Workforce</span>}
             </button>
 
             <a
               href="/knowledge"
-              className="block rounded-xl px-3 py-2.5 font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm"
+              className={`flex h-10 items-center rounded-lg font-medium text-[#64748b] transition hover:bg-white hover:text-[#111827] ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+              }`}
+              title="Knowledge Library"
             >
-              Knowledge Library
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
+                K
+              </span>
+              {!sidebarCollapsed && <span>Knowledge Library</span>}
             </a>
           </nav>
 
-          <div className="mt-6 min-h-0">
-            <div className="mb-2 px-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94a3b8]">
-                Recent chats
-              </p>
-            </div>
+          <div className={`mt-5 min-h-0 flex-1 ${sidebarCollapsed ? "px-2" : "px-2"}`}>
+            {!sidebarCollapsed && (
+              <div className="mb-1 px-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#9ca3af]">
+                  Recent
+                </p>
+              </div>
+            )}
 
-            <div className="max-h-80 space-y-0.5 overflow-y-auto pr-1 text-sm">
+            <div className="h-full space-y-0.5 overflow-y-auto pr-1 text-sm">
               {loadingChats && (
                 <p className="px-2 py-2 text-xs text-[#94a3b8]">
                   Loading chats...
                 </p>
               )}
 
-              {!loadingChats && conversations.length === 0 && (
+              {!sidebarCollapsed && !loadingChats && conversations.length === 0 && (
                 <p className="px-2 py-2 text-xs leading-5 text-[#94a3b8]">
                   No saved chats yet.
                 </p>
@@ -677,40 +795,42 @@ export default function Home() {
                 <button
                   key={conversation.id}
                   onClick={() => loadConversation(conversation.id)}
-                  className={`w-full rounded-lg px-2.5 py-2 text-left transition ${
+                  className={`flex h-9 w-full items-center rounded-lg text-left transition ${
                     activeConversationId === conversation.id
-                      ? "bg-[#e2e8f0] text-[#111827]"
-                      : "text-[#64748b] hover:bg-[#edf2f7] hover:text-[#111827]"
-                  }`}
+                      ? "bg-[#e7eceb] text-[#111827]"
+                      : "text-[#6b7280] hover:bg-white hover:text-[#111827]"
+                  } ${sidebarCollapsed ? "justify-center px-0" : "px-2.5"}`}
                   title={conversation.title}
                 >
-                  <span className="line-clamp-1 text-[13px] font-medium leading-5">
-                    {conversation.title || "New Chat"}
-                  </span>
+                  {sidebarCollapsed ? (
+                    <span className="h-2 w-2 rounded-full bg-current" />
+                  ) : (
+                    <span className="line-clamp-1 text-[13px] font-normal leading-5">
+                      {conversation.title || "New Chat"}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="mt-auto space-y-3 pt-4">
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 text-xs leading-5 text-[#64748b] shadow-sm">
-              <p className="font-semibold text-[#111827]">Document Sources</p>
-              <p>
-                Documents should be added through SharePoint and synced by
-                authorized users.
+          {!sidebarCollapsed && (
+            <div className="px-4 py-3">
+              <p className="text-[11px] leading-5 text-[#8a8f98]">
+                Documents are synced from SharePoint.
               </p>
             </div>
-          </div>
+          )}
         </aside>
 
-        <section className="flex h-screen min-h-0 flex-col bg-[#fbfbfa]">
-          <header className="flex items-center justify-between border-b border-[#eeeeee] bg-white/95 px-4 py-3 backdrop-blur md:hidden">
-            <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
+        <section className="flex h-screen min-w-0 flex-1 flex-col bg-[#fbfbfa]">
+          <header className="flex items-center justify-between border-b border-[#eeeeee] bg-[#fbfbfa]/95 px-4 py-3 backdrop-blur md:hidden">
+            <img src={LOGO_URL} alt="St. Mary's Home" className="h-8 w-auto" />
 
             <div className="flex items-center gap-2">
               <button
                 onClick={newChat}
-                className="rounded-xl bg-[#0f766e] px-3 py-2 text-sm font-semibold text-white"
+                className="rounded-lg bg-[#0f766e] px-3 py-2 text-sm font-semibold text-white"
               >
                 New
               </button>
@@ -718,23 +838,21 @@ export default function Home() {
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
+            <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col">
               {messages.length <= 1 && (
                 <div className="mx-auto mb-10 mt-4 w-full max-w-2xl text-center sm:mt-10">
                   <img
                     src={LOGO_URL}
                     alt="St. Mary's Home"
-                    className="mx-auto mb-6 h-16 w-auto sm:h-20"
+                    className="mx-auto mb-5 h-12 w-auto sm:h-14"
                   />
 
                   <h1 className="text-2xl font-semibold tracking-tight text-[#111827] sm:text-3xl">
-                    St. Mary&apos;s AI Knowledge Assistant
+                    St. Mary&apos;s AI Workforce
                   </h1>
 
                   <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-[#5f6368]">
-                    Ask questions across approved SharePoint documents, SOPs,
-                    policies, onboarding materials, IT guides, operational
-                    workflows, screenshots, and internal knowledge.
+                    An intelligent workforce of AI agents for St. Mary&apos;s staff — search organizational knowledge, complete operational tasks, troubleshoot issues, generate documents, and assist teams using approved information sources.
                   </p>
 
                   <div className="mt-7 grid gap-2 text-left sm:grid-cols-2">
@@ -743,7 +861,7 @@ export default function Home() {
                         key={prompt}
                         type="button"
                         onClick={() => setQuestion(prompt)}
-                        className="rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-medium leading-5 text-[#374151] shadow-sm transition hover:border-[#cbd5e1] hover:bg-[#f8fafc]"
+                        className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-medium leading-5 text-[#374151] shadow-sm transition hover:border-[#cbd5e1] hover:bg-[#f8fafc]"
                       >
                         {prompt}
                       </button>
@@ -761,11 +879,11 @@ export default function Home() {
                     }`}
                   >
                     <div
-                      className={`group text-sm leading-7 shadow-sm ${
+                      className={`group text-sm leading-7 ${
                         message.role === "user"
-                          ? "max-w-[88%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-white sm:max-w-[78%]"
-                          : "w-full rounded-2xl border border-[#e5e7eb] bg-white px-4 py-4 text-[#171717] sm:px-5"
-                      }`}
+                          ? "max-w-[88%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-white shadow-sm sm:max-w-[74%]"
+                          : "w-full px-1 py-3 text-[#171717] sm:px-2"
+                  }`}
                     >
                       {message.imageUrl && (
                         <img
@@ -788,6 +906,13 @@ export default function Home() {
                           </ReactMarkdown>
                         </div>
                       )}
+
+                      {message.role === "assistant" &&
+                        getRenderedAgentLabel(messages, index) && (
+                          <div className="mt-3 inline-flex rounded-full bg-[#f1f5f9] px-3 py-1 text-[11px] font-medium text-[#475569]">
+                            {getRenderedAgentLabel(messages, index)}
+                          </div>
+                        )}
 
                       {message.role === "assistant" && message.content && (
                         <div className="mt-3 flex flex-wrap gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
@@ -1026,7 +1151,7 @@ export default function Home() {
           </div>
 
           <div className="shrink-0 border-t border-[#eeeeee] bg-[#fbfbfa]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-4xl">
               {imagePreviewUrl && (
                 <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-white p-3 shadow-sm">
                   <div className="flex items-start gap-3">
@@ -1119,7 +1244,7 @@ export default function Home() {
                   placeholder={
                     selectedImage
                       ? "Ask about this image..."
-                      : "Message St. Mary's AI..."
+                      : "Message St. Mary's AI Workforce..."
                   }
                   rows={1}
                   className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-sm leading-6 outline-none placeholder:text-[#9ca3af]"
