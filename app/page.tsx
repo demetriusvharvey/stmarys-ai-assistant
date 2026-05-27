@@ -90,6 +90,32 @@ function getStrongSources(sources?: Source[]) {
   return sortedSources.slice(0, 4);
 }
 
+const ANSWER_LABEL_PREFIXES = [
+  "General Knowledge",
+  "Internal Source Summary",
+  "Troubleshooting Guidance",
+  "Generated Draft",
+] as const;
+
+type AnswerLabel = (typeof ANSWER_LABEL_PREFIXES)[number];
+
+function extractAnswerLabel(content: string): { label: AnswerLabel | null; body: string } {
+  for (const label of ANSWER_LABEL_PREFIXES) {
+    const prefix = `## ${label}\n\n`;
+    if (content.startsWith(prefix)) {
+      return { label, body: content.slice(prefix.length) };
+    }
+  }
+  return { label: null, body: content };
+}
+
+const LABEL_STYLES: Record<AnswerLabel, string> = {
+  "General Knowledge": "bg-[#f1f5f9] text-[#64748b]",
+  "Internal Source Summary": "bg-[#ecfdf5] text-[#065f46]",
+  "Troubleshooting Guidance": "bg-[#eff6ff] text-[#1d4ed8]",
+  "Generated Draft": "bg-[#faf5ff] text-[#6b21a8]",
+};
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -769,20 +795,32 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="space-y-6 pb-4">
-                {messages.map((message, index) => (
+              <div className="space-y-10 pb-6">
+                {messages.map((message, index) => {
+                  const { label: msgLabel, body: msgBody } =
+                    message.role === "assistant" && message.content
+                      ? extractAnswerLabel(message.content)
+                      : { label: null as null, body: message.content ?? "" };
+                  return (
                   <div
                     key={index}
-                    className={`flex w-full ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
+                    className={
+                      message.role === "user"
+                        ? "flex justify-end"
+                        : "flex items-start gap-5"
+                    }
                   >
+                    {message.role === "assistant" && (
+                      <div className="mt-1 flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full bg-[#e6f4f1] text-base">
+                        🏥
+                      </div>
+                    )}
                     <div
-                      className={`group text-sm leading-7 ${
+                      className={`group ${
                         message.role === "user"
-                          ? "max-w-[88%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-white shadow-sm sm:max-w-[74%]"
-                          : "w-full max-w-3xl px-1 py-3 text-[#171717] sm:px-2"
-                  }`}
+                          ? "max-w-[85%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-sm leading-relaxed text-white shadow-sm sm:max-w-[70%]"
+                          : "min-w-0 flex-1 text-[#171717]"
+                      }`}
                     >
                       {message.imageUrl && (
                         <img
@@ -793,75 +831,57 @@ export default function Home() {
                       )}
 
                       {message.content && (
-                        <div
-                          className={`prose prose-sm max-w-none ${
-                            message.role === "user"
-                              ? "prose-invert"
-                              : "prose-neutral rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 shadow-sm"
-                          }`}
-                        >
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {message.content}
-                          </ReactMarkdown>
+                        <div>
+                          {msgLabel && !message.workflow && (
+                            <div className={`mb-3 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${LABEL_STYLES[msgLabel]}`}>
+                              {msgLabel}
+                            </div>
+                          )}
+                          <div
+                            className={
+                              message.role === "user"
+                                ? "prose prose-sm prose-invert max-w-none"
+                                : "prose max-w-none text-[15.5px] leading-[1.85] text-[#1c1c1c] prose-headings:mb-4 prose-headings:mt-9 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-[#0f172a] prose-h1:text-[1.25rem] prose-h2:text-[1.1rem] prose-h3:text-[1rem] prose-p:my-[1.1rem] prose-p:leading-[1.85] prose-li:my-[0.55rem] prose-li:leading-[1.8] prose-ul:my-5 prose-ol:my-5 prose-ul:pl-5 prose-ol:pl-5 prose-pre:rounded-xl prose-pre:bg-[#f6f8fa] prose-pre:text-sm prose-code:rounded prose-code:bg-[#f1f5f9] prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:text-[#c7254e] prose-strong:font-semibold prose-strong:text-[#0f172a] prose-blockquote:border-l-2 prose-blockquote:border-[#e2e8f0] prose-blockquote:pl-4 prose-blockquote:text-[#64748b] prose-blockquote:not-italic"
+                            }
+                          >
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.role === "assistant" ? msgBody : message.content}
+                            </ReactMarkdown>
+                          </div>
                         </div>
                       )}
 
                       {message.role === "assistant" && message.selectedAgent && (
-                        <div className="mt-3 flex w-fit max-w-full flex-col gap-1 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2 text-[11px] text-[#475569] shadow-sm sm:flex-row sm:items-center sm:gap-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-sm ring-1 ring-[#e5e7eb]">
-                              {message.selectedAgent.icon}
-                            </span>
-
-                            <span className="truncate font-semibold text-[#334155]">
-                              {message.selectedAgent.displayName}
-                            </span>
-                          </div>
-
-                          <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:block" />
-
-                          <span className="w-fit rounded-full bg-white px-2 py-0.5 font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
-                            {loading && index === messages.length - 1
-                              ? "Working..."
-                              : "Ready"}
+                        <div className="mt-7 flex items-center gap-2 border-t border-[#f1f5f9] pt-3 text-[12px] text-[#94a3b8]">
+                          <span className="text-sm leading-none opacity-60">
+                            {message.selectedAgent.icon}
                           </span>
-
-                          {message.selectedAgent.reason && (
-                            <>
-                              <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:block" />
-
-                              <span className="min-w-0 truncate font-normal text-[#64748b]">
-                                Reason: {message.selectedAgent.reason}
-                              </span>
-                            </>
-                          )}
+                          <span className="text-[#b0b8c4]">
+                            {loading && index === messages.length - 1
+                              ? "Working…"
+                              : `Handled by ${message.selectedAgent.displayName}`}
+                          </span>
                         </div>
                       )}
 
                       {message.role === "assistant" && message.workflow && (
-                        <div className="mt-3 w-full max-w-sm rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-4 py-3 shadow-sm">
+                        <div className="mt-4 w-full max-w-xs border-l-2 border-[#e2e8f0] pl-4">
                           <div className="mb-2 flex items-center gap-2">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748b]">
-                              Document Creation Workflow
+                            <span className="text-[10px] font-semibold uppercase tracking-widest text-[#94a3b8]">
+                              Workflow
                             </span>
                           </div>
-                          <ol className="space-y-1.5">
+                          <ol className="space-y-2">
                             {message.workflow.steps.map((step) => (
-                              <li key={step.name} className="flex items-start gap-2 text-[12px]">
+                              <li key={step.name} className="flex items-center gap-2 text-[12px]">
                                 {step.icon === "check" && (
-                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#dcfce7] text-[#16a34a]">
-                                    {"✓"}
-                                  </span>
+                                  <span className="shrink-0 text-[#22c55e]">{"✓"}</span>
                                 )}
                                 {step.icon === "warning" && (
-                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#fef9c3] text-[#ca8a04]">
-                                    {"⚠"}
-                                  </span>
+                                  <span className="shrink-0 text-[#f59e0b]">{"⚠"}</span>
                                 )}
                                 {step.icon === "pending" && (
-                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#f1f5f9] text-[#94a3b8]">
-                                    {"·"}
-                                  </span>
+                                  <span className="shrink-0 text-[#cbd5e1]">{"·"}</span>
                                 )}
                                 <span
                                   className={
@@ -879,7 +899,7 @@ export default function Home() {
                       )}
 
                       {message.role === "assistant" && message.content && (
-                        <div className="mt-3 flex flex-wrap gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <div className="mt-5 flex flex-wrap gap-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                           <button
                             onClick={() => copyMessage(message.content, index)}
                             className="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-medium text-[#666] hover:border-[#d9d9d9] hover:bg-white hover:text-[#111]"
@@ -975,7 +995,7 @@ export default function Home() {
                       )}
 
                       {message.role === "assistant" && message.trainingMode && (
-                        <div className="mt-4 rounded-2xl border border-[#dbeafe] bg-[#eff6ff] p-3">
+                        <div className="mt-6 rounded-2xl border border-[#dbeafe] bg-[#eff6ff] p-4">
                           <div className="flex items-start gap-3">
                             <div className="rounded-full bg-[#dbeafe] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1d4ed8]">
                               Training Mode
@@ -996,7 +1016,7 @@ export default function Home() {
 
                       {message.role === "assistant" &&
                         message.escalation?.shouldEscalate && (
-                          <div className="mt-4 rounded-2xl border border-[#e5e5e5] bg-white p-3">
+                          <div className="mt-6 rounded-2xl border border-[#e5e5e5] bg-white p-4">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-[#666]">
@@ -1027,7 +1047,7 @@ export default function Home() {
 
                       {message.role === "assistant" &&
                         getStrongSources(message.sources).length > 0 && (
-                          <div className="mt-4 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-3">
+                          <div className="mt-6 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
                                 Source Citations
@@ -1099,12 +1119,16 @@ export default function Home() {
                         )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {loading && (
-                  <div className="flex justify-start">
-                    <div className="rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 text-sm text-[#666] shadow-sm">
-                      Thinking...
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full bg-[#e6f4f1] text-base">
+                      🏥
+                    </div>
+                    <div className="py-2 text-sm text-[#64748b]">
+                      Thinking…
                     </div>
                   </div>
                 )}
