@@ -3,6 +3,11 @@
 import { ClipboardEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type {
+  WorkflowMetadata,
+  WorkflowStep,
+  WorkflowStepStatus,
+} from "@/lib/workflow/types";
 
 type Source = {
   id: string;
@@ -37,6 +42,7 @@ type Message = {
   imageUrl?: string;
   imageName?: string;
   selectedAgent?: SelectedAgent;
+  workflow?: WorkflowMetadata;
 };
 
 type Conversation = {
@@ -556,6 +562,7 @@ export default function Home() {
                   escalation: assistantEscalation || undefined,
                   trainingMode: assistantTrainingMode,
                   selectedAgent: payload.selectedAgent,
+                  workflow: payload.workflow,
                 };
               }
 
@@ -828,6 +835,46 @@ export default function Home() {
                               </span>
                             </>
                           )}
+                        </div>
+                      )}
+
+                      {message.role === "assistant" && message.workflow && (
+                        <div className="mt-3 w-full max-w-sm rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-4 py-3 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748b]">
+                              Document Creation Workflow
+                            </span>
+                          </div>
+                          <ol className="space-y-1.5">
+                            {message.workflow.steps.map((step) => (
+                              <li key={step.name} className="flex items-start gap-2 text-[12px]">
+                                {step.icon === "check" && (
+                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#dcfce7] text-[#16a34a]">
+                                    {"✓"}
+                                  </span>
+                                )}
+                                {step.icon === "warning" && (
+                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#fef9c3] text-[#ca8a04]">
+                                    {"⚠"}
+                                  </span>
+                                )}
+                                {step.icon === "pending" && (
+                                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#f1f5f9] text-[#94a3b8]">
+                                    {"·"}
+                                  </span>
+                                )}
+                                <span
+                                  className={
+                                    step.status === "warning"
+                                      ? "font-medium text-[#92400e]"
+                                      : "text-[#374151]"
+                                  }
+                                >
+                                  {step.label}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
                         </div>
                       )}
 

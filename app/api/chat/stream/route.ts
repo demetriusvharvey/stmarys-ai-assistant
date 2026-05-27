@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { AgentRouter } from "@/lib/agents/AgentRouter";
 import { db } from "@/lib/db";
 import { openai } from "@/lib/openai";
+import { buildDocumentCreationWorkflow } from "@/lib/workflow/documentCreation";
 
 export const runtime = "nodejs";
 
@@ -357,6 +358,11 @@ export async function POST(req: NextRequest) {
                 ]
               );
 
+              const selectedAgentMeta = getSelectedAgentMetadata(
+                routeDecision.agent,
+                routeDecision.reason
+              );
+
               sendEvent(controller, {
                 type: "done",
                 answer: labeledDraftAnswer,
@@ -374,11 +380,11 @@ export async function POST(req: NextRequest) {
                   isGeneralGuidance: true,
                   usedConversationHistory: 0,
                 },
-                selectedAgent: getSelectedAgentMetadata(
-                  routeDecision.agent,
-                  routeDecision.reason
-                ),
+                selectedAgent: selectedAgentMeta,
                 sources: [],
+                workflow: buildDocumentCreationWorkflow(
+                  selectedAgentMeta.displayName
+                ),
               });
 
               controller.close();

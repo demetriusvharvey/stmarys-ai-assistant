@@ -4,6 +4,7 @@ import { AgentRouter } from "@/lib/agents/AgentRouter";
 import { resolveUserRoles } from "@/lib/agents/resolveUserRoles";
 import type { AgentIdentity, AgentResponse } from "@/lib/agents/types";
 import { writeAuditLog } from "@/lib/audit";
+import { buildDocumentCreationWorkflow } from "@/lib/workflow/documentCreation";
 
 export const runtime = "nodejs";
 
@@ -137,6 +138,11 @@ export async function POST(req: Request) {
         },
       });
 
+      const selectedAgentMeta = getSelectedAgentMetadata(
+        routeDecision.agent,
+        routeDecision.reason
+      );
+
       return NextResponse.json({
         success: true,
         question,
@@ -147,11 +153,9 @@ export async function POST(req: Request) {
           hasStrongInternalMatch: false,
           hasPossibleInternalMatch: false,
         },
-        selectedAgent: getSelectedAgentMetadata(
-          routeDecision.agent,
-          routeDecision.reason
-        ),
+        selectedAgent: selectedAgentMeta,
         sources: [],
+        workflow: buildDocumentCreationWorkflow(selectedAgentMeta.displayName),
       });
     }
 
