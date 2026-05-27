@@ -4,6 +4,7 @@ import { verifyAdminSessionToken } from "@/lib/adminSession";
 
 const PROTECTED_PREFIXES = [
   "/admin",
+  "/api/admin",
   "/api/ai-tools",
   "/api/sharepoint/sync",
   "/api/sharepoint",
