@@ -1,6 +1,7 @@
 export type AgentName =
   | "internal_knowledge"
   | "policy"
+  | "executive"
   | "it_support"
   | "document_assistant";
 
@@ -31,6 +32,7 @@ export type AgentUser = {
 export type AgentMode =
   | "internal"
   | "policy"
+  | "executive"
   | "it_support"
   | "document_assistant";
 

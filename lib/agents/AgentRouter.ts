@@ -1,4 +1,5 @@
 import { DocumentAssistantAgent } from "./agents/DocumentAssistantAgent";
+import { ExecutiveAgent } from "./agents/ExecutiveAgent";
 import { InternalKnowledgeAgent } from "./agents/InternalKnowledgeAgent";
 import { ITSupportAgent } from "./agents/ITSupportAgent";
 import { PolicyAgent } from "./agents/PolicyAgent";
@@ -51,6 +52,20 @@ const POLICY_KEYWORDS = [
   "process",
 ];
 
+const EXECUTIVE_KEYWORDS = [
+  "executive",
+  "summarize for leadership",
+  "leadership",
+  "cfo",
+  "ceo",
+  "risk",
+  "trend",
+  "status",
+  "overview",
+  "recommendation",
+  "briefing",
+];
+
 function findMatches(question: string, keywords: string[]) {
   return keywords.filter((keyword) => question.includes(keyword));
 }
@@ -61,12 +76,14 @@ export class AgentRouter {
   constructor() {
     const internalKnowledgeAgent = new InternalKnowledgeAgent();
     const policyAgent = new PolicyAgent();
+    const executiveAgent = new ExecutiveAgent();
     const itSupportAgent = new ITSupportAgent();
     const documentAssistantAgent = new DocumentAssistantAgent();
 
     this.agents = {
       [internalKnowledgeAgent.name]: internalKnowledgeAgent,
       [policyAgent.name]: policyAgent,
+      [executiveAgent.name]: executiveAgent,
       [itSupportAgent.name]: itSupportAgent,
       [documentAssistantAgent.name]: documentAssistantAgent,
     };
@@ -104,6 +121,17 @@ export class AgentRouter {
         confidence: 0.8,
         reason: "Matched policy, SOP, procedure, attendance, handbook, guideline, or process keywords.",
         matchedKeywords: policyMatches,
+      };
+    }
+
+    const executiveMatches = findMatches(question, EXECUTIVE_KEYWORDS);
+
+    if (executiveMatches.length > 0) {
+      return {
+        agent: "executive",
+        confidence: 0.75,
+        reason: "Matched leadership, executive briefing, trend, risk, status, overview, or recommendation keywords.",
+        matchedKeywords: executiveMatches,
       };
     }
 

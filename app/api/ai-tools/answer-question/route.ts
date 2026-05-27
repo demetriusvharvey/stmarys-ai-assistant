@@ -76,7 +76,11 @@ export async function POST(req: Request) {
     try {
       const selectedAgent = router.getAgent(routeDecision);
 
-      if (selectedAgent && routeDecision.agent !== "policy") {
+      if (
+        selectedAgent &&
+        routeDecision.agent !== "policy" &&
+        routeDecision.agent !== "executive"
+      ) {
         const agentResponse = await selectedAgent.answer({
           question,
           user: {
