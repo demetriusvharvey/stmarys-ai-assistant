@@ -55,13 +55,6 @@ const STARTER_MESSAGE: Message = {
     "Hi, I’m St. Mary’s AI Workforce. I orchestrate specialized AI agents to help staff search approved knowledge, troubleshoot operational issues, draft documents, and support teams.",
 };
 
-const EMPTY_STATE_PROMPTS = [
-  "Create a new nurse onboarding checklist",
-  "Troubleshoot a SigmaCare login issue",
-  "Summarize the attendance policy",
-  "Draft an email about a printer outage",
-];
-
 function urgencyClass(urgency: Escalation["urgency"]) {
   if (urgency === "high") {
     return "border-red-200 bg-red-50 text-red-700";
@@ -106,7 +99,6 @@ export default function Home() {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -596,54 +588,18 @@ export default function Home() {
     }
   }
 
-  function getSuggestionPrompts() {
-    if (selectedImage) {
-      return [
-        "Explain this screenshot",
-        "What issue do you see?",
-        "Summarize this error",
-        "What should I do next?",
-      ];
-    }
-
-    const lastUserMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "user")?.content
-      .toLowerCase();
-
-    if (lastUserMessage?.includes("printer")) {
-      return [
-        "Create a printer troubleshooting SOP",
-        "Draft an incident report",
-        "Escalate this to IT",
-        "Make this into a checklist",
-      ];
-    }
-
-    if (lastUserMessage?.includes("onboard")) {
-      return [
-        "Create onboarding checklist",
-        "Draft welcome email",
-        "List required systems",
-        "Make this a training guide",
-      ];
-    }
-
-    return EMPTY_STATE_PROMPTS;
-  }
-
   return (
     <main className="h-screen overflow-hidden bg-[#fbfbfa] text-[#171717]">
       <div className="flex h-screen overflow-hidden">
         <aside
           className={`hidden h-screen shrink-0 overflow-hidden border-r border-[#ececec] bg-[#f7f7f7] transition-[width] duration-300 ease-in-out md:flex md:flex-col ${
-            sidebarCollapsed ? "w-[72px]" : "w-[244px]"
+            sidebarCollapsed ? "w-[76px]" : "w-[244px]"
           }`}
         >
           <div className="flex h-14 items-center justify-between px-3">
             {sidebarCollapsed ? (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-semibold text-[#0f766e] shadow-sm">
-                SM
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-xs font-semibold text-[#0f766e] shadow-sm">
+               ⌂
               </div>
             ) : (
               <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
@@ -662,12 +618,12 @@ export default function Home() {
 
           <button
             onClick={newChat}
-            className={`mx-2 mt-1 flex h-10 items-center rounded-lg text-sm font-medium text-[#111827] transition hover:bg-white ${
+            className={`mx-2 mt-1 flex h-10 items-center rounded-xl text-sm font-medium text-[#111827] transition hover:bg-white ${
               sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
             }`}
             title="New chat"
           >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#d9d9d9] bg-white text-base leading-none">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#d9d9d9] bg-white text-base leading-none">
               +
             </span>
             {!sidebarCollapsed && <span>New chat</span>}
@@ -675,29 +631,51 @@ export default function Home() {
 
           <nav className="mt-2 space-y-0.5 px-2 text-sm">
             <button
-              className={`flex h-10 w-full items-center rounded-lg bg-[#e8ecef] font-medium text-[#111827] ${
+              className={`flex h-10 w-full items-center rounded-xl bg-[#e8ecef] font-medium text-[#111827] ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3 text-left"
               }`}
               title="AI Workforce"
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
-                C
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
+                ◔
               </span>
               {!sidebarCollapsed && <span>AI Workforce</span>}
             </button>
 
             <a
               href="/knowledge"
-              className={`flex h-10 items-center rounded-lg font-medium text-[#64748b] transition hover:bg-white hover:text-[#111827] ${
+              className={`flex h-10 items-center rounded-xl font-medium text-[#64748b] transition hover:bg-white hover:text-[#111827] ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
               }`}
               title="Knowledge Library"
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
-                K
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
+                □
               </span>
               {!sidebarCollapsed && <span>Knowledge Library</span>}
             </a>
+
+            {sidebarCollapsed && (
+              <>
+                <button
+                  type="button"
+                  className="flex h-10 w-full items-center justify-center rounded-xl text-[#64748b] transition hover:bg-white hover:text-[#111827]"
+                  title="Search chats"
+                  aria-label="Search chats"
+                >
+                  ⌕
+                </button>
+
+                <button
+                  type="button"
+                  className="flex h-10 w-full items-center justify-center rounded-xl text-[#64748b] transition hover:bg-white hover:text-[#111827]"
+                  title="Recent chats"
+                  aria-label="Recent chats"
+                >
+                  ☰
+                </button>
+              </>
+            )}
           </nav>
 
           <div className={`mt-5 min-h-0 flex-1 ${sidebarCollapsed ? "px-2" : "px-2"}`}>
@@ -722,24 +700,20 @@ export default function Home() {
                 </p>
               )}
 
-              {conversations.map((conversation) => (
+              {!sidebarCollapsed && conversations.map((conversation) => (
                 <button
                   key={conversation.id}
                   onClick={() => loadConversation(conversation.id)}
                   className={`flex h-9 w-full items-center rounded-lg text-left transition ${
                     activeConversationId === conversation.id
-                      ? "bg-[#e7eceb] text-[#111827]"
-                      : "text-[#6b7280] hover:bg-white hover:text-[#111827]"
-                  } ${sidebarCollapsed ? "justify-center px-0" : "px-2.5"}`}
+                      ? "bg-white text-[#111827] shadow-sm"
+                      : "text-[#6b7280] hover:bg-white/80 hover:text-[#111827]"
+                  } px-2.5`}
                   title={conversation.title}
                 >
-                  {sidebarCollapsed ? (
-                    <span className="h-2 w-2 rounded-full bg-current" />
-                  ) : (
-                    <span className="line-clamp-1 text-[13px] font-normal leading-5">
-                      {conversation.title || "New Chat"}
-                    </span>
-                  )}
+                  <span className="min-w-0 truncate text-[13px] font-normal leading-5">
+                    {conversation.title || "New Chat"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -785,19 +759,6 @@ export default function Home() {
                   <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-[#5f6368]">
                     An intelligent workforce of AI agents for St. Mary&apos;s staff — search organizational knowledge, complete operational tasks, troubleshoot issues, generate documents, and assist teams using approved information sources.
                   </p>
-
-                  <div className="mt-7 grid gap-2 text-left sm:grid-cols-2">
-                    {EMPTY_STATE_PROMPTS.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => setQuestion(prompt)}
-                        className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-medium leading-5 text-[#374151] shadow-sm transition hover:border-[#cbd5e1] hover:bg-[#f8fafc]"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -813,7 +774,7 @@ export default function Home() {
                       className={`group text-sm leading-7 ${
                         message.role === "user"
                           ? "max-w-[88%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-white shadow-sm sm:max-w-[74%]"
-                          : "w-full px-1 py-3 text-[#171717] sm:px-2"
+                          : "w-full max-w-3xl px-1 py-3 text-[#171717] sm:px-2"
                   }`}
                     >
                       {message.imageUrl && (
@@ -829,7 +790,7 @@ export default function Home() {
                           className={`prose prose-sm max-w-none ${
                             message.role === "user"
                               ? "prose-invert"
-                              : "prose-neutral"
+                              : "prose-neutral rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 shadow-sm"
                           }`}
                         >
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1135,37 +1096,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-
-              <div className="mb-3 overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setSuggestionsOpen((value) => !value)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#4b5563] hover:bg-[#f8fafc]"
-                >
-                  <span>Suggestions</span>
-                  <span className={`text-xs transition-transform ${suggestionsOpen ? "rotate-180" : ""}`}>
-                    ⌄
-                  </span>
-                </button>
-
-                {suggestionsOpen && (
-                  <div className="flex flex-wrap gap-2 border-t border-[#eeeeee] px-4 pb-4 pt-3">
-                    {getSuggestionPrompts().map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => {
-                          setQuestion(prompt);
-                          setSuggestionsOpen(false);
-                        }}
-                        className="rounded-full border border-[#d9d9d9] bg-[#f8fafc] px-3 py-1.5 text-xs font-medium text-[#374151] transition hover:border-[#cbd5e1] hover:bg-white"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
               <div className="flex items-end gap-2 rounded-3xl border border-[#d1d5db] bg-white px-3 py-3 shadow-lg shadow-black/5 focus-within:border-[#94a3b8] sm:gap-3 sm:px-4">
                 <input
