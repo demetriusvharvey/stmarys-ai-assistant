@@ -47,6 +47,13 @@ const STARTER_MESSAGE: Message = {
     "Hi, I’m the St. Mary’s AI Knowledge Assistant. Ask me about approved policies, SOPs, IT procedures, onboarding docs, SigmaCare, CareTracker, or SharePoint knowledge.",
 };
 
+const EMPTY_STATE_PROMPTS = [
+  "Create a new nurse onboarding checklist",
+  "Troubleshoot a SigmaCare login issue",
+  "Summarize the attendance policy",
+  "Draft an email about a printer outage",
+];
+
 function urgencyClass(urgency: Escalation["urgency"]) {
   if (urgency === "high") {
     return "border-red-200 bg-red-50 text-red-700";
@@ -684,46 +691,42 @@ export default function Home() {
       ];
     }
 
-    return [
-      "Create a printer troubleshooting SOP",
-      "Explain this screenshot",
-      "How do I onboard a user?",
-      "Draft an incident report",
-      "Create a SigmaCare access request template",
-      "Setup Outlook on iPhone",
-    ];
+    return EMPTY_STATE_PROMPTS;
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-white text-[#171717]">
-      <div className="grid h-screen grid-cols-1 overflow-hidden md:grid-cols-[280px_1fr]">
-        <aside className="hidden h-screen overflow-y-auto border-r border-[#e5e5e5] bg-[#f7f7f8] p-3 md:flex md:flex-col">
-          <div className="mb-4 rounded-xl bg-white p-3 shadow-sm">
-            <img src={LOGO_URL} alt="St. Mary's Home" className="h-14 w-auto" />
+    <main className="h-screen overflow-hidden bg-[#f6f7f8] text-[#171717]">
+      <div className="grid h-screen grid-cols-1 overflow-hidden md:grid-cols-[300px_1fr]">
+        <aside className="hidden h-screen overflow-y-auto border-r border-[#e5e7eb] bg-[#f8fafc] p-4 md:flex md:flex-col">
+          <div className="mb-4 rounded-2xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
+            <img src={LOGO_URL} alt="St. Mary's Home" className="h-12 w-auto" />
           </div>
 
           <button
             onClick={newChat}
-            className="mb-3 rounded-xl border border-[#d9d9d9] bg-white px-3 py-2.5 text-left text-sm font-medium shadow-sm hover:bg-[#f1f1f1]"
+            className="mb-4 flex w-full items-center justify-between rounded-2xl bg-[#0f766e] px-4 py-3 text-left text-sm font-semibold text-white shadow-sm transition hover:bg-[#115e59]"
           >
-            + New Chat
+            <span>New chat</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-base leading-none">
+              +
+            </span>
           </button>
 
           <nav className="space-y-1 text-sm">
-            <button className="w-full rounded-lg bg-[#ececec] px-3 py-2 text-left font-medium">
+            <button className="w-full rounded-xl bg-white px-3 py-2.5 text-left font-semibold text-[#111827] shadow-sm ring-1 ring-[#e5e7eb]">
               AI Knowledge Chat
             </button>
 
             <a
               href="/knowledge"
-              className="block rounded-lg px-3 py-2 text-[#444] hover:bg-[#ececec]"
+              className="block rounded-xl px-3 py-2.5 font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm"
             >
               Knowledge Library
             </a>
 
             <a
               href="/admin/sync"
-              className="block rounded-lg px-3 py-2 text-[#444] hover:bg-[#ececec]"
+              className="block rounded-xl px-3 py-2.5 font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm"
             >
               Sync Admin
             </a>
@@ -731,30 +734,40 @@ export default function Home() {
             <button
               onClick={syncSharePoint}
               disabled={syncing}
-              className="w-full rounded-lg px-3 py-2 text-left text-[#444] hover:bg-[#ececec] disabled:opacity-50"
+              className="w-full rounded-xl px-3 py-2.5 text-left font-medium text-[#475569] transition hover:bg-white hover:text-[#111827] hover:shadow-sm disabled:opacity-50"
             >
               {syncing ? "Creating Sync Job..." : "Queue SharePoint Sync"}
             </button>
           </nav>
 
           {syncStatus && (
-            <div className="mt-3 rounded-lg border border-[#e5e5e5] bg-white p-3 text-xs leading-5 text-[#555] shadow-sm">
+            <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs leading-5 text-[#475569] shadow-sm">
               {syncStatus}
             </div>
           )}
 
-          <div className="mt-6">
-            <p className="mb-2 px-3 text-xs font-medium text-[#777]">
-              Recent chats
-            </p>
+          <div className="mt-6 min-h-0">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
+                Recent chats
+              </p>
 
-            <div className="max-h-64 space-y-1 overflow-y-auto text-sm">
+              {conversations.length > 0 && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
+                  {conversations.length}
+                </span>
+              )}
+            </div>
+
+            <div className="max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
               {loadingChats && (
-                <p className="px-3 py-2 text-xs text-[#777]">Loading chats...</p>
+                <p className="rounded-xl px-3 py-2 text-xs text-[#64748b]">
+                  Loading chats...
+                </p>
               )}
 
               {!loadingChats && conversations.length === 0 && (
-                <p className="px-3 py-2 text-xs text-[#777]">
+                <p className="rounded-xl border border-dashed border-[#cbd5e1] bg-white/70 px-3 py-3 text-xs leading-5 text-[#64748b]">
                   No saved chats yet.
                 </p>
               )}
@@ -763,28 +776,30 @@ export default function Home() {
                 <button
                   key={conversation.id}
                   onClick={() => loadConversation(conversation.id)}
-                  className={`w-full truncate rounded-lg px-3 py-2 text-left hover:bg-[#ececec] ${
+                  className={`w-full rounded-xl px-3 py-2.5 text-left transition ${
                     activeConversationId === conversation.id
-                      ? "bg-[#ececec] text-[#111]"
-                      : "text-[#444]"
+                      ? "bg-white text-[#111827] shadow-sm ring-1 ring-[#cbd5e1]"
+                      : "text-[#475569] hover:bg-white hover:text-[#111827] hover:shadow-sm"
                   }`}
                   title={conversation.title}
                 >
-                  {conversation.title || "New Chat"}
+                  <span className="line-clamp-2 text-sm font-medium leading-5">
+                    {conversation.title || "New Chat"}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
 
           <div className="mt-auto space-y-3 pt-4">
-            <div className="rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-sm">
-              <p className="text-xs font-semibold text-[#333]">Manual Upload</p>
+            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
+              <p className="text-xs font-semibold text-[#111827]">Manual Upload</p>
 
               <div className="mt-3 space-y-3">
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-xs outline-none"
+                  className="w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-xs outline-none focus:border-[#94a3b8]"
                 >
                   <option>IT</option>
                   <option>Onboarding</option>
@@ -804,7 +819,7 @@ export default function Home() {
                 <button
                   onClick={uploadPdf}
                   disabled={uploading}
-                  className="w-full rounded-lg bg-[#0f766e] px-3 py-2 text-xs font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
+                  className="w-full rounded-xl bg-[#0f766e] px-3 py-2 text-xs font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
                 >
                   {uploading ? "Uploading..." : "Upload PDF"}
                 </button>
@@ -815,70 +830,82 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-xl bg-white p-3 text-xs leading-5 text-[#666] shadow-sm">
-              <p className="font-semibold text-[#333]">Safety Rules</p>
+            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 text-xs leading-5 text-[#64748b] shadow-sm">
+              <p className="font-semibold text-[#111827]">Safety Rules</p>
               <p>Read-only · No medical advice · Source-based answers</p>
             </div>
           </div>
         </aside>
 
-        <section className="flex h-screen min-h-0 flex-col bg-white">
-          <header className="flex items-center justify-between border-b border-[#eeeeee] px-4 py-3 md:hidden">
-            <img src={LOGO_URL} alt="St. Mary's Home" className="h-10 w-auto" />
+        <section className="flex h-screen min-h-0 flex-col bg-[#fbfbfa]">
+          <header className="flex items-center justify-between border-b border-[#eeeeee] bg-white/95 px-4 py-3 backdrop-blur md:hidden">
+            <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
 
             <div className="flex items-center gap-2">
               <a
                 href="/admin/sync"
-                className="rounded-lg border border-[#d9d9d9] px-3 py-2 text-sm"
+                className="rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm font-medium text-[#475569]"
               >
                 Sync
               </a>
 
               <button
                 onClick={newChat}
-                className="rounded-lg border border-[#d9d9d9] px-3 py-2 text-sm"
+                className="rounded-xl bg-[#0f766e] px-3 py-2 text-sm font-semibold text-white"
               >
                 New
               </button>
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8">
-            <div className="mx-auto max-w-5xl">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
               {messages.length <= 1 && (
-                <div className="mb-10 mt-8 text-center">
+                <div className="mx-auto mb-10 mt-4 w-full max-w-2xl text-center sm:mt-10">
                   <img
                     src={LOGO_URL}
                     alt="St. Mary's Home"
-                    className="mx-auto mb-6 h-20 w-auto"
+                    className="mx-auto mb-6 h-16 w-auto sm:h-20"
                   />
 
-                  <h1 className="text-3xl font-semibold tracking-tight">
+                  <h1 className="text-2xl font-semibold tracking-tight text-[#111827] sm:text-3xl">
                     St. Mary&apos;s AI Knowledge Assistant
                   </h1>
 
-                  <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[#666]">
+                  <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-[#5f6368]">
                     Ask questions across approved SharePoint documents, SOPs,
                     policies, onboarding materials, IT guides, operational
                     workflows, screenshots, and internal knowledge.
                   </p>
 
+                  <div className="mt-7 grid gap-2 text-left sm:grid-cols-2">
+                    {EMPTY_STATE_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => setQuestion(prompt)}
+                        className="rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-medium leading-5 text-[#374151] shadow-sm transition hover:border-[#cbd5e1] hover:bg-[#f8fafc]"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              <div className="space-y-5">
+              <div className="space-y-6 pb-4">
                 {messages.map((message, index) => (
                   <div
                     key={index}
-                    className={`flex ${
+                    className={`flex w-full ${
                       message.role === "user" ? "justify-end" : "justify-start"
                     }`}
                   >
                     <div
-                      className={`group max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-sm ${
+                      className={`group text-sm leading-7 shadow-sm ${
                         message.role === "user"
-                          ? "bg-[#ececec] text-[#171717]"
-                          : "bg-[#f7f7f8] text-[#171717]"
+                          ? "max-w-[88%] rounded-2xl rounded-br-md bg-[#0f766e] px-4 py-3 text-white sm:max-w-[78%]"
+                          : "w-full rounded-2xl border border-[#e5e7eb] bg-white px-4 py-4 text-[#171717] sm:px-5"
                       }`}
                     >
                       {message.imageUrl && (
@@ -890,7 +917,13 @@ export default function Home() {
                       )}
 
                       {message.content && (
-                        <div className="prose prose-sm max-w-none prose-neutral">
+                        <div
+                          className={`prose prose-sm max-w-none ${
+                            message.role === "user"
+                              ? "prose-invert"
+                              : "prose-neutral"
+                          }`}
+                        >
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {message.content}
                           </ReactMarkdown>
@@ -1046,38 +1079,70 @@ export default function Home() {
 
                       {message.role === "assistant" &&
                         getStrongSources(message.sources).length > 0 && (
-                          <div className="mt-4 rounded-2xl border border-[#e5e5e5] bg-white p-3">
-                            <p className="mb-2 text-xs font-semibold text-[#555]">
-                              Sources
-                            </p>
+                          <div className="mt-4 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-3">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
+                                Source Citations
+                              </p>
 
-                            <div className="space-y-2">
-                              {getStrongSources(message.sources).map((source) => (
+                              <span className="rounded-full bg-white px-2 py-1 text-[10px] font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
+                                {getStrongSources(message.sources).length} shown
+                              </span>
+                            </div>
+
+                            <div className="grid gap-2">
+                              {getStrongSources(message.sources).map((source, sourceIndex) => (
                                 <div
                                   key={source.id}
-                                  className="rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-3 text-xs"
+                                  className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs shadow-sm"
                                 >
-                                  <p className="font-medium text-[#222]">
-                                    {source.title || source.sourceUrl}
-                                  </p>
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-start gap-2">
+                                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e6f4f1] text-[10px] font-bold text-[#0f766e]">
+                                          {sourceIndex + 1}
+                                        </span>
 
-                                  <p className="mt-1 text-[#666]">
-                                    {source.category || "Unknown"} · Match{" "}
-                                    {Math.round(
-                                      Number(source.similarity || 0) * 100
-                                    )}
-                                    %
-                                  </p>
+                                        <div className="min-w-0">
+                                          <p className="line-clamp-2 font-semibold leading-5 text-[#111827]">
+                                            {source.title || source.sourceUrl || "Untitled source"}
+                                          </p>
+
+                                          <p className="mt-1 text-[#64748b]">
+                                            {[source.category, source.source]
+                                              .filter(Boolean)
+                                              .join(" · ") || "Internal knowledge"}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+                                      <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[10px] font-medium text-[#64748b]">
+                                        Match{" "}
+                                        {Math.round(
+                                          Number(source.similarity || 0) * 100
+                                        )}
+                                        %
+                                      </span>
+
+                                      {source.sourceUrl && (
+                                        <a
+                                          href={source.sourceUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex rounded-full bg-[#0f766e] px-3 py-1 text-[10px] font-semibold text-white transition hover:bg-[#115e59]"
+                                        >
+                                          Open
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
 
                                   {source.sourceUrl && (
-                                    <a
-                                      href={source.sourceUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="mt-2 inline-flex rounded-md bg-[#e6f4f1] px-2 py-1 text-[10px] font-medium text-[#0f766e] hover:bg-[#d4eee9]"
-                                    >
-                                      Open document
-                                    </a>
+                                    <p className="mt-2 truncate pl-7 text-[10px] text-[#94a3b8]">
+                                      {source.sourceUrl}
+                                    </p>
                                   )}
                                 </div>
                               ))}
@@ -1090,7 +1155,7 @@ export default function Home() {
 
                 {loading && (
                   <div className="flex justify-start">
-                    <div className="rounded-3xl bg-[#f7f7f8] px-5 py-4 text-sm text-[#666] shadow-sm">
+                    <div className="rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 text-sm text-[#666] shadow-sm">
                       Thinking...
                     </div>
                   </div>
@@ -1101,10 +1166,10 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-[#eeeeee] bg-white px-4 py-4">
-            <div className="mx-auto max-w-5xl">
+          <div className="shrink-0 border-t border-[#eeeeee] bg-[#fbfbfa]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4">
+            <div className="mx-auto max-w-3xl">
               {imagePreviewUrl && (
-                <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-[#f7f7f8] p-3">
+                <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-white p-3 shadow-sm">
                   <div className="flex items-start gap-3">
                     <img
                       src={imagePreviewUrl}
@@ -1131,11 +1196,11 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="mb-3 rounded-2xl border border-[#eeeeee] bg-white shadow-sm">
+              <div className="mb-3 overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-sm">
                 <button
                   type="button"
                   onClick={() => setSuggestionsOpen((value) => !value)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#555] hover:bg-[#fafafa]"
+                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#4b5563] hover:bg-[#f8fafc]"
                 >
                   <span>Suggestions</span>
                   <span className={`text-xs transition-transform ${suggestionsOpen ? "rotate-180" : ""}`}>
@@ -1153,7 +1218,7 @@ export default function Home() {
                           setQuestion(prompt);
                           setSuggestionsOpen(false);
                         }}
-                        className="rounded-full border border-[#d9d9d9] bg-[#f7f7f8] px-3 py-1.5 text-xs font-medium text-[#444] transition hover:bg-white"
+                        className="rounded-full border border-[#d9d9d9] bg-[#f8fafc] px-3 py-1.5 text-xs font-medium text-[#374151] transition hover:border-[#cbd5e1] hover:bg-white"
                       >
                         {prompt}
                       </button>
@@ -1162,7 +1227,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="flex items-end gap-3 rounded-2xl border border-[#d9d9d9] bg-white px-4 py-3 shadow-sm">
+              <div className="flex items-end gap-2 rounded-3xl border border-[#d1d5db] bg-white px-3 py-3 shadow-lg shadow-black/5 focus-within:border-[#94a3b8] sm:gap-3 sm:px-4">
                 <input
                   ref={imageInputRef}
                   type="file"
@@ -1176,7 +1241,7 @@ export default function Home() {
                 <button
                   onClick={() => imageInputRef.current?.click()}
                   disabled={loading}
-                  className="rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#f7f7f8] disabled:opacity-50"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-lg font-semibold leading-none hover:bg-[#f7f7f8] disabled:opacity-50"
                   title="Attach image"
                 >
                   +
@@ -1198,13 +1263,13 @@ export default function Home() {
                       : "Message St. Mary's AI..."
                   }
                   rows={1}
-                  className="max-h-32 flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-[#999]"
+                  className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-sm leading-6 outline-none placeholder:text-[#9ca3af]"
                 />
 
                 <button
                   onClick={askQuestion}
                   disabled={loading || (!question.trim() && !selectedImage)}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-[#171717] text-lg font-semibold leading-none text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0f766e] text-lg font-semibold leading-none text-white transition hover:bg-[#115e59] disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Send message"
                   title="Send"
                 >
