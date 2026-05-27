@@ -2,9 +2,12 @@ import { writeAuditLog } from "@/lib/audit";
 import { evaluateToolPermission } from "./permission";
 import { toolDefinitions } from "./toolDefinitions";
 import type {
+  ToolAuditDecision,
+  ToolAuditMetadata,
   ToolContext,
   ToolDefinition,
   ToolName,
+  ToolPermissionDecision,
   ToolResult,
 } from "./types";
 
@@ -27,6 +30,7 @@ export class ToolRegistry {
         allowed: false,
         wouldAllow: false,
         observeOnlyAllowed: false,
+        actuallyAllowed: false,
         reason: "tool_not_registered",
         readOnly: true,
         requiresConfirmation: false,
@@ -38,7 +42,6 @@ export class ToolRegistry {
         input,
         context,
         permission,
-        success: false,
         outputSummary: "Tool is not registered.",
       });
 
@@ -60,7 +63,6 @@ export class ToolRegistry {
       input,
       context,
       permission,
-      success: true,
       outputSummary: "Observe-only permission decision logged.",
     });
 
@@ -78,34 +80,55 @@ export class ToolRegistry {
     input,
     context,
     permission,
-    success,
     outputSummary,
   }: {
     toolName: ToolName;
     input: unknown;
     context: ToolContext;
-    permission: ToolResult["permission"];
-    success: boolean;
+    permission: ToolPermissionDecision;
     outputSummary: string;
   }) {
+    const auditMetadata: ToolAuditMetadata = {
+      tool: toolName,
+      user: context.userEmail ?? null,
+      roles: context.userRoles,
+      roleSource: context.roleSource ?? null,
+      selectedAgent: context.selectedAgent,
+      channel: context.channel,
+      agentRunId: context.agentRunId ?? null,
+      decision: toAuditDecision(permission),
+      reason: permission.reason,
+      wouldAllow: permission.wouldAllow,
+      observeOnlyAllowed: permission.observeOnlyAllowed,
+      actuallyAllowed: permission.actuallyAllowed,
+      inputSummary: summarizeValue(input),
+      outputSummary,
+      observeOnly: permission.observeOnly,
+    };
+
     await writeAuditLog({
-      userEmail: context.userEmail || null,
-      action: "tool_registry_observe_only",
+      userEmail: context.userEmail ?? null,
+      action: "tool_call",
       route: "ToolRegistry.call",
-      metadata: {
-        agentRunId: context.agentRunId || null,
-        selectedAgent: context.selectedAgent,
-        channel: context.channel,
-        userRoles: context.userRoles,
-        toolName,
-        inputSummary: summarizeValue(input),
-        permission,
-        success,
-        outputSummary,
-        observeOnly: true,
-      },
+      metadata: auditMetadata,
     });
   }
+}
+
+/**
+ * Maps a ToolPermissionDecision to the ToolAuditDecision written to audit logs.
+ *
+ * While observeOnly is active the decision is always "observe_only_pass"
+ * regardless of whether wouldAllow is true or false — the distinction is
+ * preserved in the wouldAllow field for shadow analysis.
+ *
+ * Once enforcement is enabled (observeOnly removed), this will return
+ * "allowed" or "denied" based on actuallyAllowed.
+ */
+function toAuditDecision(permission: ToolPermissionDecision): ToolAuditDecision {
+  if (permission.reason === "tool_not_registered") return "tool_not_registered";
+  if (permission.observeOnlyAllowed) return "observe_only_pass";
+  return permission.actuallyAllowed ? "allowed" : "denied";
 }
 
 function summarizeValue(value: unknown) {
