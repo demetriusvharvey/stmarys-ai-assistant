@@ -61,14 +61,35 @@ const app = new App({
 });
 
 async function askStMarysAI(question: string): Promise<AnswerQuestionResponse> {
+  return askStMarysAIWithIdentity(question);
+}
+
+type TeamsIdentity = {
+  channel: "teams";
+  teamsUserId?: string;
+  aadObjectId?: string;
+  email?: string;
+  displayName?: string;
+  tenantId?: string;
+  conversationId?: string;
+};
+
+async function askStMarysAIWithIdentity(
+  question: string,
+  identity?: TeamsIdentity
+): Promise<AnswerQuestionResponse> {
   const response = await fetch(AI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(process.env.INTERNAL_ADMIN_SECRET
+        ? { "x-internal-admin-secret": process.env.INTERNAL_ADMIN_SECRET }
+        : {}),
     },
     body: JSON.stringify({
       question,
       limit: 6,
+      identity,
     }),
   });
 
@@ -107,6 +128,25 @@ function cleanQuestion(text?: string) {
 
 app.on("message", async ({ send, activity }) => {
   const question = cleanQuestion(activity.text);
+  const from = activity.from as unknown as {
+    id?: string;
+    aadObjectId?: string;
+    userPrincipalName?: string;
+    name?: string;
+  };
+  const conversation = activity.conversation as unknown as {
+    id?: string;
+    tenantId?: string;
+  };
+  const identity: TeamsIdentity = {
+    channel: "teams",
+    teamsUserId: from.id,
+    aadObjectId: from.aadObjectId,
+    email: from.userPrincipalName,
+    displayName: from.name,
+    tenantId: conversation.tenantId,
+    conversationId: conversation.id,
+  };
 
   if (!question) {
     await send("Please ask a question about St. Mary’s approved knowledge.");
@@ -116,7 +156,7 @@ app.on("message", async ({ send, activity }) => {
   try {
     await send("Searching St. Mary’s knowledge base...");
 
-    const result = await askStMarysAI(question);
+    const result = await askStMarysAIWithIdentity(question, identity);
 
     const answer =
       result.answer ||

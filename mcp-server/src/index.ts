@@ -3,6 +3,16 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const API_BASE = "http://localhost:3000/api/ai-tools";
+const INTERNAL_ADMIN_SECRET = process.env.INTERNAL_ADMIN_SECRET;
+
+function apiHeaders() {
+  return {
+    "Content-Type": "application/json",
+    ...(INTERNAL_ADMIN_SECRET
+      ? { "x-internal-admin-secret": INTERNAL_ADMIN_SECRET }
+      : {}),
+  };
+}
 
 const server = new McpServer({
   name: "stmarys-ai-assistant",
@@ -19,9 +29,7 @@ server.tool(
   async ({ query, limit = 5 }) => {
     const res = await fetch(`${API_BASE}/search-knowledge`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: apiHeaders(),
       body: JSON.stringify({
         query,
         limit,
@@ -50,9 +58,7 @@ server.tool(
   async ({ question }) => {
     const res = await fetch(`${API_BASE}/answer-question`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: apiHeaders(),
       body: JSON.stringify({
         question,
       }),
@@ -76,7 +82,9 @@ server.tool(
   "Get SharePoint ingestion sync status",
   {},
   async () => {
-    const res = await fetch(`${API_BASE}/sync-status`);
+    const res = await fetch(`${API_BASE}/sync-status`, {
+      headers: apiHeaders(),
+    });
 
     const data = await res.json();
 
@@ -99,7 +107,10 @@ server.tool(
   },
   async ({ documentId }) => {
     const res = await fetch(
-      `${API_BASE}/open-document?documentId=${documentId}`
+      `${API_BASE}/open-document?documentId=${documentId}`,
+      {
+        headers: apiHeaders(),
+      }
     );
 
     const data = await res.json();
