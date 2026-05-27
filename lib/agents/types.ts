@@ -2,6 +2,7 @@ export type AgentName =
   | "internal_knowledge"
   | "policy"
   | "executive"
+  | "medical_education"
   | "it_support"
   | "document_assistant";
 
@@ -33,6 +34,7 @@ export type AgentMode =
   | "internal"
   | "policy"
   | "executive"
+  | "medical_education"
   | "it_support"
   | "document_assistant";
 
