@@ -839,18 +839,35 @@ export default function Home() {
                       )}
 
                       {message.role === "assistant" && message.selectedAgent && (
-                          <div className="mt-3 inline-flex flex-col rounded-2xl bg-[#f1f5f9] px-3 py-2 text-[11px] font-medium text-[#475569]">
-                            <span>
-                              {message.selectedAgent.icon}{" "}
-                              {message.selectedAgent.displayName}
+                        <div className="mt-3 flex w-fit max-w-full flex-col gap-1 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2 text-[11px] text-[#475569] shadow-sm sm:flex-row sm:items-center sm:gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-sm ring-1 ring-[#e5e7eb]">
+                              {message.selectedAgent.icon}
                             </span>
 
-                            {message.selectedAgent.reason && (
-                              <span className="mt-0.5 font-normal text-[#64748b]">
+                            <span className="truncate font-semibold text-[#334155]">
+                              {message.selectedAgent.displayName}
+                            </span>
+                          </div>
+
+                          <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:block" />
+
+                          <span className="w-fit rounded-full bg-white px-2 py-0.5 font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
+                            {loading && index === messages.length - 1
+                              ? "Working..."
+                              : "Ready"}
+                          </span>
+
+                          {message.selectedAgent.reason && (
+                            <>
+                              <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:block" />
+
+                              <span className="min-w-0 truncate font-normal text-[#64748b]">
                                 Reason: {message.selectedAgent.reason}
                               </span>
-                            )}
-                          </div>
+                            </>
+                          )}
+                        </div>
                       )}
 
                       {message.role === "assistant" && message.content && (
