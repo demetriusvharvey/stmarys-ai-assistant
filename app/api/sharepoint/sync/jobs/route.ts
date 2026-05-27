@@ -193,7 +193,13 @@ export async function POST() {
         ["sharepoint", "discovering"]
       );
 
-    jobId = jobResult.rows[0].id;
+    const syncJobId = jobResult.rows[0]?.id;
+
+    if (!syncJobId) {
+      throw new Error("Sync job was not created.");
+    }
+
+    jobId = syncJobId;
 
     const token =
       await getGraphAccessToken();
@@ -257,7 +263,7 @@ export async function POST() {
               siteId: site.id,
               driveId: drive.id,
               siteName,
-              jobId,
+              jobId: syncJobId,
               counters,
             });
 

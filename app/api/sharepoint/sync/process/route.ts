@@ -11,11 +11,14 @@ import { db } from "@/lib/db";
 import { openai } from "@/lib/openai";
 import { chunkText } from "@/lib/chunkText";
 import { getGraphAccessToken } from "@/lib/microsoftGraph";
+
 import {
   deIdentifyText,
   sanitizeErrorMessage,
   sanitizeFilenameForLogs,
 } from "@/lib/phi/deidentify";
+
+import { writeAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -287,6 +290,16 @@ export async function POST(req: Request) {
             [item.job_id]
           );
 
+          await writeAuditLog({
+            action: "sharepoint_sync_blocked",
+            route: "/api/sharepoint/sync/process",
+            metadata: {
+              file: safeFileName,
+              reason: "Blocked by PHI source safety filter",
+              siteName: item.site_name,
+            },
+          });
+
           results.push({
             file: safeFileName,
             status: "blocked",
@@ -344,7 +357,7 @@ export async function POST(req: Request) {
           [
             safeTitle,
             "sharepoint",
-            null,
+            item.web_url || null,
             category,
             externalId,
           ]
@@ -402,16 +415,35 @@ export async function POST(req: Request) {
 
         processed++;
 
+        await writeAuditLog({
+          action: "sharepoint_document_synced",
+          route: "/api/sharepoint/sync/process",
+          metadata: {
+            file: safeFileName,
+            siteName: item.site_name,
+            chunks: chunks.length,
+            phiFindingsRemoved: findings.reduce(
+              (sum, finding) => sum + finding.count,
+              0
+            ),
+          },
+        });
+
         results.push({
           file: safeFileName,
           status: "synced",
           chunks: chunks.length,
-          phiFindingsRemoved: findings.reduce((sum, finding) => sum + finding.count, 0),
+          phiFindingsRemoved: findings.reduce(
+            (sum, finding) => sum + finding.count,
+            0
+          ),
         });
       } catch (error: any) {
         failed++;
 
-        const safeError = sanitizeErrorMessage(error.message || "Failed to process file");
+        const safeError = sanitizeErrorMessage(
+          error.message || "Failed to process file"
+        );
 
         await db.query(
           `
@@ -434,6 +466,16 @@ export async function POST(req: Request) {
           [item.job_id]
         );
 
+        await writeAuditLog({
+          action: "sharepoint_sync_failed",
+          route: "/api/sharepoint/sync/process",
+          metadata: {
+            file: safeFileName,
+            error: safeError,
+            siteName: item.site_name,
+          },
+        });
+
         results.push({
           file: safeFileName,
           status: "failed",
@@ -451,9 +493,19 @@ export async function POST(req: Request) {
       results,
     });
   } catch (error: any) {
-    const safeError = sanitizeErrorMessage(error.message || "Batch processor failed");
+    const safeError = sanitizeErrorMessage(
+      error.message || "Batch processor failed"
+    );
 
     console.error("Batch sync processor error:", safeError);
+
+    await writeAuditLog({
+      action: "sharepoint_sync_route_failure",
+      route: "/api/sharepoint/sync/process",
+      metadata: {
+        error: safeError,
+      },
+    });
 
     return NextResponse.json(
       {
