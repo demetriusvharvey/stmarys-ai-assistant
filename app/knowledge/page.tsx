@@ -207,6 +207,28 @@ export default function KnowledgePage() {
 
           <div className="flex-1 overflow-y-auto px-6 py-6">
             <div className="mx-auto max-w-6xl">
+              <section className="mb-5 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-4 py-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
+                      Admin Actions
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-[#64748b]">
+                      Documents should be added through SharePoint and synced by authorized users.
+                    </p>
+                  </div>
+
+                  <a
+                    href="/admin/sync"
+                    className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#d9e2df] bg-white px-3 py-2 text-sm font-semibold text-[#0f766e] shadow-sm transition hover:border-[#0f766e] hover:bg-[#f0fdfa]"
+                  >
+                    <span aria-hidden="true">↻</span>
+                    Sync Knowledge Library
+                  </a>
+                </div>
+              </section>
+
               <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-medium">
