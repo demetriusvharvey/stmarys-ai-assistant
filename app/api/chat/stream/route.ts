@@ -256,6 +256,10 @@ function getSelectedAgentMetadata(agentName: string, reason?: string) {
       displayName: "Policy Agent",
       icon: "📋",
     },
+    policy: {
+      displayName: "Policy Agent",
+      icon: "📋",
+    },
     it_support: {
       displayName: "IT Support Agent",
       icon: "🖥",

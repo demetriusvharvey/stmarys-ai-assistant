@@ -13,6 +13,10 @@ function getSelectedAgentMetadata(agentName: string, reason?: string) {
       displayName: "Policy Agent",
       icon: "📋",
     },
+    policy: {
+      displayName: "Policy Agent",
+      icon: "📋",
+    },
     it_support: {
       displayName: "IT Support Agent",
       icon: "🖥",
@@ -72,7 +76,7 @@ export async function POST(req: Request) {
     try {
       const selectedAgent = router.getAgent(routeDecision);
 
-      if (selectedAgent) {
+      if (selectedAgent && routeDecision.agent !== "policy") {
         const agentResponse = await selectedAgent.answer({
           question,
           user: {

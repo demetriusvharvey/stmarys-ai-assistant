@@ -1,6 +1,7 @@
 import { DocumentAssistantAgent } from "./agents/DocumentAssistantAgent";
 import { InternalKnowledgeAgent } from "./agents/InternalKnowledgeAgent";
 import { ITSupportAgent } from "./agents/ITSupportAgent";
+import { PolicyAgent } from "./agents/PolicyAgent";
 import type { Agent, AgentRequest, RouteDecision } from "./types";
 
 const IT_KEYWORDS = [
@@ -40,6 +41,16 @@ const DOCUMENT_KEYWORDS = [
   "document this",
 ];
 
+const POLICY_KEYWORDS = [
+  "policy",
+  "sop",
+  "procedure",
+  "attendance",
+  "handbook",
+  "guideline",
+  "process",
+];
+
 function findMatches(question: string, keywords: string[]) {
   return keywords.filter((keyword) => question.includes(keyword));
 }
@@ -49,11 +60,13 @@ export class AgentRouter {
 
   constructor() {
     const internalKnowledgeAgent = new InternalKnowledgeAgent();
+    const policyAgent = new PolicyAgent();
     const itSupportAgent = new ITSupportAgent();
     const documentAssistantAgent = new DocumentAssistantAgent();
 
     this.agents = {
       [internalKnowledgeAgent.name]: internalKnowledgeAgent,
+      [policyAgent.name]: policyAgent,
       [itSupportAgent.name]: itSupportAgent,
       [documentAssistantAgent.name]: documentAssistantAgent,
     };
@@ -80,6 +93,17 @@ export class AgentRouter {
         confidence: 0.75,
         reason: "Matched IT support or troubleshooting keywords.",
         matchedKeywords: itMatches,
+      };
+    }
+
+    const policyMatches = findMatches(question, POLICY_KEYWORDS);
+
+    if (policyMatches.length > 0) {
+      return {
+        agent: "policy",
+        confidence: 0.8,
+        reason: "Matched policy, SOP, procedure, attendance, handbook, guideline, or process keywords.",
+        matchedKeywords: policyMatches,
       };
     }
 
