@@ -132,6 +132,12 @@ export default function AdminUsersPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
+              onClick={() => router.push("/admin/audit")}
+              className="rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#374151] hover:bg-[#f9fafb]"
+            >
+              Audit Log
+            </button>
+            <button
               onClick={() => router.push("/")}
               className="rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#374151] hover:bg-[#f9fafb]"
             >

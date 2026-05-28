@@ -1,113 +1,86 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/session";
+
+export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const conversationId = searchParams.get("conversationId");
+  const session = await getSession();
+  if (!session) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-    if (!conversationId) {
-      return NextResponse.json(
-        { success: false, error: "Missing conversationId" },
-        { status: 400 }
-      );
+  const { searchParams } = new URL(req.url);
+  const conversationId = searchParams.get("conversationId");
+  if (!conversationId) {
+    return NextResponse.json({ success: false, error: "Missing conversationId" }, { status: 400 });
+  }
+
+  try {
+    // Verify conversation belongs to this user
+    const conv = await db.query(
+      `SELECT id FROM conversations WHERE id = $1 AND user_id = $2`,
+      [conversationId, session.id]
+    );
+    if (conv.rows.length === 0) {
+      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     }
 
     const result = await db.query(
-      `
-      select
-        id,
-        conversation_id,
-        role,
-        content,
-        sources,
-        created_at
-      from messages
-      where conversation_id = $1
-      order by created_at asc
-      `,
+      `SELECT id, conversation_id, role, content, sources, created_at
+       FROM messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC`,
       [conversationId]
     );
-
-    return NextResponse.json({
-      success: true,
-      messages: result.rows,
-    });
+    return NextResponse.json({ success: true, messages: result.rows });
   } catch (error: any) {
-    console.error("List messages error:", error);
-
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to list messages" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+
   try {
     const body = await req.json();
-
-    const conversationId = body.conversationId;
-    const role = body.role;
-    const content = body.content;
-    const sources = body.sources || null;
+    const { conversationId, role, content, sources } = body;
 
     if (!conversationId || !role || !content) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "conversationId, role, and content are required",
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: "conversationId, role, and content are required" }, { status: 400 });
+    }
+    if (!["user", "assistant"].includes(role)) {
+      return NextResponse.json({ success: false, error: "Invalid role" }, { status: 400 });
     }
 
-    if (!["user", "assistant"].includes(role)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid role" },
-        { status: 400 }
-      );
+    // Verify ownership
+    const conv = await db.query(
+      `SELECT id FROM conversations WHERE id = $1 AND user_id = $2`,
+      [conversationId, session.id]
+    );
+    if (conv.rows.length === 0) {
+      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     }
 
     const result = await db.query(
-      `
-      insert into messages (
-        conversation_id,
-        role,
-        content,
-        sources
-      )
-      values ($1, $2, $3, $4)
-      returning id, conversation_id, role, content, sources, created_at
-      `,
+      `INSERT INTO messages (conversation_id, role, content, sources)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, conversation_id, role, content, sources, created_at`,
       [conversationId, role, content, sources ? JSON.stringify(sources) : null]
     );
 
     await db.query(
-      `
-      update conversations
-      set
-        updated_at = now(),
-        title = case
-          when title = 'New Chat' and $2 = 'user'
-          then left($3, 60)
-          else title
-        end
-      where id = $1
-      `,
+      `UPDATE conversations
+       SET updated_at = now(),
+           title = CASE
+             WHEN title = 'New Chat' AND $2 = 'user' THEN LEFT($3, 60)
+             ELSE title
+           END
+       WHERE id = $1`,
       [conversationId, role, content]
     );
 
-    return NextResponse.json({
-      success: true,
-      message: result.rows[0],
-    });
+    return NextResponse.json({ success: true, message: result.rows[0] });
   } catch (error: any) {
-    console.error("Create message error:", error);
-
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to create message" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
