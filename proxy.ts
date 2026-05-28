@@ -1,89 +1,46 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifyAdminSessionToken } from "@/lib/adminSession";
+import { jwtVerify } from "jose";
 
-const PROTECTED_PREFIXES = [
-  "/admin",
-  "/api/admin",
+const COOKIE_NAME = "smhdc_session";
+
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/logout",
   "/api/ai-tools",
-  "/api/sharepoint/sync",
-  "/api/sharepoint",
-  "/api/ingest",
-  "/api/ingest-pdf",
-  "/api/documents",
-  "/api/feedback",
+  "/_next",
+  "/favicon.ico",
+  "/branding",
 ];
 
-const PUBLIC_ROUTES = [
-  "/admin/login",
-  "/api/admin/login",
-];
+function isPublic(pathname: string) {
+  return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+}
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (pathname === "/api/feedback" && req.method === "POST") {
+  if (isPublic(pathname)) return NextResponse.next();
+
+  const token = req.cookies.get(COOKIE_NAME)?.value;
+
+  if (!token) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  try {
+    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
+    await jwtVerify(token, secret);
     return NextResponse.next();
+  } catch {
+    const loginUrl = new URL("/login", req.url);
+    return NextResponse.redirect(loginUrl);
   }
-
-  if (pathname === "/api/documents" && req.method === "GET") {
-    return NextResponse.next();
-  }
-
-  const isPublic = PUBLIC_ROUTES.some((route) =>
-    pathname.startsWith(route)
-  );
-
-  if (isPublic) {
-    return NextResponse.next();
-  }
-
-  const isProtected = PROTECTED_PREFIXES.some((prefix) =>
-    pathname.startsWith(prefix)
-  );
-
-  if (!isProtected) {
-    return NextResponse.next();
-  }
-
-  const sessionCookie =
-    req.cookies.get("stmarys_admin_session")?.value;
-
-  const adminSecret =
-    process.env.INTERNAL_ADMIN_SECRET;
-
-  if (!adminSecret) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Server auth is not configured.",
-      },
-      { status: 500 }
-    );
-  }
-
-  const authHeader = req.headers.get("authorization") || "";
-  const bearerToken = authHeader.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length)
-    : null;
-  const internalSecretHeader = req.headers.get("x-internal-admin-secret");
-
-  const hasValidSession = sessionCookie
-    ? await verifyAdminSessionToken(sessionCookie, adminSecret)
-    : false;
-
-  if (hasValidSession || bearerToken === adminSecret || internalSecretHeader === adminSecret) {
-    return NextResponse.next();
-  }
-
-  const loginUrl = new URL(
-    "/admin/login",
-    req.url
-  );
-
-  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/:path*"],
+  matcher: ["/((?!_next/static|_next/image).*)"],
 };
