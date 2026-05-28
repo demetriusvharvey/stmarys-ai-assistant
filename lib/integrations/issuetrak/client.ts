@@ -107,12 +107,12 @@ export class IssuetrakClient {
     let res: Response;
     try {
       res = await fetch(
-        `${this.baseUrl}/api/${this.apiVersion}/Issues`,
+        `${this.baseUrl}/api/v2/Issues`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-IssueTrak-API-Key": this.apiKey,
+            "Authorization": `Bearer ${this.apiKey}`,
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(10000),
@@ -129,11 +129,11 @@ export class IssuetrakClient {
     if (res.status === 429) {
       // Retry once after 2 seconds
       await new Promise((r) => setTimeout(r, 2000));
-      res = await fetch(`${this.baseUrl}/api/${this.apiVersion}/Issues`, {
+      res = await fetch(`${this.baseUrl}/api/v2/Issues`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-IssueTrak-API-Key": this.apiKey,
+          "Authorization": `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
