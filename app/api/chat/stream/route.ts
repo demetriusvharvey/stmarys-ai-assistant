@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
+import { getSession } from "@/lib/session";
 import { AgentRouter } from "@/lib/agents/AgentRouter";
 import { db } from "@/lib/db";
 import { openai } from "@/lib/openai";
 import { buildDocumentCreationWorkflow } from "@/lib/workflow/documentCreation";
+import { deIdentifyText } from "@/lib/phi/deidentify";
 
 export const runtime = "nodejs";
 
@@ -328,8 +330,17 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        const session = await getSession();
+        if (!session) {
+          sendEvent(controller, { type: "error", error: "Unauthorized" });
+          controller.close();
+          return;
+        }
+
         const body = await req.json();
-        const { question, userEmail, conversationId } = body;
+        const { question, conversationId } = body;
+        const userEmail = session.email ?? null;
+        const userDisplayName = session.name ?? null;
 
         if (!question || typeof question !== "string") {
           sendEvent(controller, {
@@ -340,7 +351,11 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        if (isMetaQuestion(question)) {
+        const { cleanText: sanitizedQuestion, findings: phiFindings } = deIdentifyText(question);
+        const phiDetected = phiFindings.length > 0;
+        const phiRedactedCount = phiFindings.reduce((sum, f) => sum + f.count, 0);
+
+        if (isMetaQuestion(sanitizedQuestion)) {
           const metaAnswer = getMetaAnswer();
           streamText(controller, metaAnswer);
           sendEvent(controller, {
@@ -352,6 +367,7 @@ export async function POST(req: NextRequest) {
             verification: { answerMode: "general_guidance", usedInternalDocuments: false, isGeneralGuidance: true, usedConversationHistory: 0 },
             selectedAgent: getSelectedAgentMetadata("internal_knowledge", "meta_question"),
             sources: [],
+            phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
           });
           controller.close();
           return;
@@ -359,7 +375,7 @@ export async function POST(req: NextRequest) {
 
         const router = new AgentRouter();
         const routeDecision = router.route({
-          question,
+          question: sanitizedQuestion,
           userEmail,
           conversationId,
           channel: "web",
@@ -369,7 +385,7 @@ export async function POST(req: NextRequest) {
           try {
             const selectedAgent = router.getAgent(routeDecision);
             const agentResponse = await selectedAgent?.answer({
-              question,
+              question: sanitizedQuestion,
               user: {
                 email: userEmail || null,
               },
@@ -402,7 +418,7 @@ export async function POST(req: NextRequest) {
                 `,
                 [
                   userEmail || null,
-                  question,
+                  sanitizedQuestion,
                   labeledDraftAnswer,
                   JSON.stringify({
                     route: routeDecision,
@@ -438,6 +454,7 @@ export async function POST(req: NextRequest) {
                 workflow: buildDocumentCreationWorkflow(
                   selectedAgentMeta.displayName
                 ),
+                phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
               });
 
               controller.close();
@@ -472,7 +489,7 @@ export async function POST(req: NextRequest) {
 
         const embeddingResult = await openai.embeddings.create({
           model: "text-embedding-3-small",
-          input: question,
+          input: sanitizedQuestion,
         });
 
         const questionEmbedding = embeddingResult.data[0].embedding;
@@ -588,7 +605,7 @@ How to phrase verification:
               role: "user",
               content: `
 Current question:
-${question}
+${sanitizedQuestion}
 
 Answer mode:
 ${answerMode}
@@ -630,7 +647,7 @@ ${context || "No active internal context found."}
           }
         }
 
-        const escalation = getEscalationGuidance(question, fullAnswer);
+        const escalation = getEscalationGuidance(sanitizedQuestion, fullAnswer);
 
         await db.query(
           `
@@ -638,7 +655,7 @@ ${context || "No active internal context found."}
           (user_email, question, answer, retrieved_sources)
           values ($1, $2, $3, $4)
           `,
-          [userEmail || null, question, fullAnswer, JSON.stringify(matches.rows)]
+          [userEmail || null, sanitizedQuestion, fullAnswer, JSON.stringify(matches.rows)]
         );
 
         sendEvent(controller, {
@@ -657,6 +674,7 @@ ${context || "No active internal context found."}
             routeDecision.agent,
             routeDecision.reason
           ),
+          phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
           sources: matches.rows.map((row: any) => ({
             id: row.id,
             documentId: row.document_id,

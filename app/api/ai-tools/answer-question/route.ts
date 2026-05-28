@@ -5,6 +5,7 @@ import { resolveUserRoles } from "@/lib/agents/resolveUserRoles";
 import type { AgentIdentity, AgentResponse } from "@/lib/agents/types";
 import { writeAuditLog } from "@/lib/audit";
 import { buildDocumentCreationWorkflow } from "@/lib/workflow/documentCreation";
+import { deIdentifyText } from "@/lib/phi/deidentify";
 
 export const runtime = "nodejs";
 
@@ -61,10 +62,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const { cleanText: sanitizedQuestion, findings: phiFindings } = deIdentifyText(question);
+    const phiDetected = phiFindings.length > 0;
+    const phiRedactedCount = phiFindings.reduce((sum, f) => sum + f.count, 0);
+
     const resolvedRoles = resolveUserRoles(identity);
     const router = new AgentRouter();
     const routeDecision = router.route({
-      question,
+      question: sanitizedQuestion,
       userEmail: identity?.email || null,
       conversationId: identity?.conversationId || null,
     });
@@ -83,7 +88,7 @@ export async function POST(req: Request) {
         routeDecision.agent !== "executive"
       ) {
         const agentResponse = await selectedAgent.answer({
-          question,
+          question: sanitizedQuestion,
           user: {
             identity,
             email: identity?.email || null,
@@ -156,11 +161,12 @@ export async function POST(req: Request) {
         selectedAgent: selectedAgentMeta,
         sources: [],
         workflow: buildDocumentCreationWorkflow(selectedAgentMeta.displayName),
+        phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
       });
     }
 
     const result = await answerQuestion({
-      question,
+      question: sanitizedQuestion,
       limit,
       category,
       audit: false,
@@ -208,6 +214,7 @@ export async function POST(req: Request) {
         routeDecision.agent,
         routeDecision.reason
       ),
+      phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
       sources: result.sources.map((source) => ({
         chunkId: source.id,
         documentId: source.documentId,

@@ -43,6 +43,7 @@ type Message = {
   imageName?: string;
   selectedAgent?: SelectedAgent;
   workflow?: WorkflowMetadata;
+  phiWarning?: { detected: boolean; redactedCount: number };
 };
 
 type Conversation = {
@@ -132,6 +133,10 @@ export default function Home() {
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; role: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(d => d && setCurrentUser(d.user));
+  }, []);
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -515,7 +520,6 @@ export default function Home() {
         },
         body: JSON.stringify({
           question: currentQuestion,
-          userEmail: "demo@stmarys.local",
           conversationId,
         }),
       });
@@ -589,6 +593,7 @@ export default function Home() {
                   trainingMode: assistantTrainingMode,
                   selectedAgent: payload.selectedAgent,
                   workflow: payload.workflow,
+                  phiWarning: payload.phiWarning || undefined,
                 };
               }
 
@@ -753,10 +758,36 @@ export default function Home() {
           </div>
 
           {!sidebarCollapsed && (
-            <div className="px-4 py-3">
-              <p className="text-[11px] leading-5 text-[#8a8f98]">
-                Documents are synced from SharePoint.
-              </p>
+            <div className="border-t border-[#ececec] px-3 py-3">
+              <div className="flex items-center gap-2 rounded-xl px-2 py-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e6f4f1] text-xs font-semibold text-[#0f766e]">
+                  {currentUser?.name?.[0]?.toUpperCase() ?? "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium text-[#111827]">
+                    {currentUser?.name ?? "Staff"}
+                  </p>
+                  <p className="truncate text-[11px] text-[#9ca3af]">
+                    {currentUser?.role === "admin" ? "Admin" : currentUser?.role === "it_staff" ? "IT Staff" : "Staff"}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }}
+                  title="Sign out"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#9ca3af] transition hover:bg-[#f1f5f9] hover:text-[#374151]"
+                >
+                  ↪
+                </button>
+              </div>
+              {(currentUser?.role === "admin" || currentUser?.role === "it_staff") && (
+                <a
+                  href="/admin/users"
+                  className="mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
+                >
+                  <span>⚙</span>
+                  <span>Manage accounts</span>
+                </a>
+              )}
             </div>
           )}
         </aside>
@@ -828,6 +859,15 @@ export default function Home() {
                           alt={message.imageName || "Uploaded image"}
                           className="mb-3 max-h-[420px] w-full rounded-2xl object-contain"
                         />
+                      )}
+
+                      {message.role === "assistant" && message.phiWarning?.detected && (
+                        <div className="mb-3 flex items-start gap-2 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2.5 text-[12px] leading-5 text-[#92400e]">
+                          <span className="mt-0.5 shrink-0">⚠️</span>
+                          <span>
+                            Sensitive information was detected and removed from your message before processing. Do not enter resident, patient, or employee information into this assistant.
+                          </span>
+                        </div>
                       )}
 
                       {message.content && (
@@ -1221,6 +1261,15 @@ export default function Home() {
               <p className="mt-2 text-center text-xs text-[#888]">
                 Answers should be verified against source documents before
                 operational use.
+              </p>
+              <p className="mt-1 text-center text-xs text-[#b0b8c4]">
+                Security concern or PHI exposure?{" "}
+                <a
+                  href="mailto:infotechsupport@smhdc.org"
+                  className="underline underline-offset-2 hover:text-[#6b7280]"
+                >
+                  Report to IT / Compliance
+                </a>
               </p>
             </div>
           </div>
