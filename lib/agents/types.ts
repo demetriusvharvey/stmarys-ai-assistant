@@ -1,3 +1,5 @@
+import type { WorkflowMetadata } from "@/lib/workflow/types";
+
 export type AgentName =
   | "internal_knowledge"
   | "policy"
@@ -86,6 +88,7 @@ export type AgentResponse = {
   safety: AgentSafety;
   toolsUsed: ToolCallSummary[];
   auditMetadata: Record<string, unknown>;
+  workflow?: WorkflowMetadata;
 };
 
 export type RouteDecision = {

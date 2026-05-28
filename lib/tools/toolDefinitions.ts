@@ -1,5 +1,10 @@
 import type { ToolDefinition } from "./types";
 import { openai } from "@/lib/openai";
+import { IssuetrakClient } from "@/lib/integrations/issuetrak/client";
+import { resolveCategory } from "@/lib/integrations/issuetrak/categoryResolver";
+import { deIdentifyText } from "@/lib/phi/deidentify";
+import type { CreateIssuetrakTicketInput } from "@/lib/integrations/issuetrak/types";
+import { IssuetrakApiError, IssuetrakValidationError } from "@/lib/integrations/issuetrak/types";
 
 async function stubRun() {
   return {
@@ -49,6 +54,44 @@ For executive summaries, use short decision-oriented bullets with risks and next
   return {
     draft: completion.choices[0]?.message?.content || "",
   };
+}
+
+const issuetrakClient = new IssuetrakClient();
+
+async function createIssuetrakTicketRun(input: unknown) {
+  const i = input as CreateIssuetrakTicketInput;
+
+  // Second-pass PHI scrub at tool layer
+  const { cleanText: cleanSubject } = deIdentifyText(i.subject ?? "");
+  const { cleanText: cleanDesc, findings } = deIdentifyText(i.description ?? "");
+  const phiCount = findings.reduce((acc, f) => acc + f.count, 0);
+
+  const sanitizedInput: CreateIssuetrakTicketInput = {
+    ...i,
+    subject: cleanSubject,
+    description: cleanDesc,
+    category: resolveCategory(`${cleanSubject} ${cleanDesc}`).category,
+  };
+
+  try {
+    const result = await issuetrakClient.createIssue(sanitizedInput);
+    return {
+      ...result,
+      phiRedactions: phiCount,
+    };
+  } catch (err) {
+    if (err instanceof IssuetrakValidationError) {
+      return { status: "failed", message: err.message, field: err.field };
+    }
+    if (err instanceof IssuetrakApiError) {
+      console.error("[createIssuetrakTicket] API error:", err.statusCode, err.message);
+      return {
+        status: "failed",
+        message: "Unable to submit ticket to Issuetrak. Please contact IT directly.",
+      };
+    }
+    return { status: "failed", message: "Unexpected error creating ticket." };
+  }
 }
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -101,5 +144,15 @@ export const toolDefinitions: ToolDefinition[] = [
     allowedRoles: ["staff", "it_staff", "admin"],
     requiresConfirmation: false,
     run: draftDocumentRun,
+  },
+  {
+    name: "createIssuetrakTicket",
+    description: "Create an IT support ticket in Issuetrak on behalf of a staff member.",
+    readOnly: false,
+    risk: "medium",
+    allowedAgents: ["it_support"],
+    allowedRoles: ["staff", "it_staff", "admin"],
+    requiresConfirmation: true,
+    run: createIssuetrakTicketRun,
   },
 ];

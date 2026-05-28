@@ -9,7 +9,7 @@ export type WorkflowStep = {
 
 export type WorkflowMetadata = {
   workflowId: string;
-  workflowType: "document_creation";
+  workflowType: "document_creation" | "ticket_creation";
   status: "completed";
   agentDisplayName: string;
   steps: WorkflowStep[];

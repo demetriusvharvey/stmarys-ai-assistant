@@ -8,7 +8,7 @@ const PUBLIC_PATHS = [
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
-  "/api/ai-tools",
+  "/api/ai-tools",   // MCP server and public AI tool endpoints
   "/_next",
   "/favicon.ico",
   "/branding",
@@ -18,10 +18,24 @@ function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 }
 
+function hasInternalSecret(req: NextRequest): boolean {
+  const secret = process.env.INTERNAL_ADMIN_SECRET;
+  if (!secret) return false;
+  const header = req.headers.get("x-internal-admin-secret");
+  const bearer = req.headers.get("authorization");
+  return (
+    header === secret ||
+    bearer === `Bearer ${secret}`
+  );
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (isPublic(pathname)) return NextResponse.next();
+
+  // Allow MCP server and service-to-service calls
+  if (hasInternalSecret(req)) return NextResponse.next();
 
   const token = req.cookies.get(COOKIE_NAME)?.value;
 

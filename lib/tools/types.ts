@@ -7,7 +7,8 @@ export type ToolName =
   | "getSyncStatus"
   | "searchApprovedHealthSources"
   | "fetchApprovedWebPage"
-  | "draftDocument";
+  | "draftDocument"
+  | "createIssuetrakTicket";
 
 export type ToolRisk = "low" | "medium" | "high";
 
