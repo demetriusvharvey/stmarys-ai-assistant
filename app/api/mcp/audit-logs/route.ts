@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { verifyInternalSecret } from "@/lib/mcp/auth";
 import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!verifyInternalSecret(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
   const userEmail = searchParams.get("userEmail") || null;
   const search    = searchParams.get("search") || null;
-  const limit     = Math.min(parseInt(searchParams.get("limit") || "100", 10), 500);
-  const offset    = parseInt(searchParams.get("offset") || "0", 10);
+  const limit     = Math.min(parseInt(searchParams.get("limit") || "25", 10), 100);
 
   try {
     const conditions: string[] = [];
@@ -30,28 +28,19 @@ export async function GET(req: Request) {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const dataParams = [...params, limit];
 
-    const countResult = await db.query(
-      `SELECT COUNT(*) as total FROM audit_logs ${where}`,
-      params
-    );
-
-    const dataParams = [...params, limit, offset];
     const result = await db.query(
-      `SELECT id, user_email, question, answer, retrieved_sources, created_at
+      `SELECT id, user_email, question, answer, created_at
        FROM audit_logs
        ${where}
        ORDER BY created_at DESC
-       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+       LIMIT $${dataParams.length}`,
       dataParams
     );
 
-    return NextResponse.json({
-      logs: result.rows,
-      total: parseInt(countResult.rows[0].total, 10),
-    });
+    return NextResponse.json({ logs: result.rows, count: result.rows.length });
   } catch (error: any) {
-    console.error("[audit-logs]", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
