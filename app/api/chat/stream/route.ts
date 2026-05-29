@@ -326,6 +326,42 @@ function getSelectedAgentMetadata(agentName: string, reason?: string) {
   };
 }
 
+function sendAgentStatus(
+  controller: ReadableStreamDefaultController,
+  {
+    agent,
+    status,
+    label,
+    sourceCount,
+    toolName,
+    workflowId,
+  }: {
+    agent?: ReturnType<typeof getSelectedAgentMetadata>;
+    status:
+      | "routing"
+      | "agent_selected"
+      | "searching_sources"
+      | "checking_safety"
+      | "drafting"
+      | "ready"
+      | "error";
+    label: string;
+    sourceCount?: number;
+    toolName?: string;
+    workflowId?: string;
+  }
+) {
+  sendEvent(controller, {
+    type: "agent_status",
+    agent,
+    status,
+    label,
+    sourceCount,
+    toolName,
+    workflowId,
+  });
+}
+
 export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
@@ -374,11 +410,24 @@ export async function POST(req: NextRequest) {
         }
 
         const router = new AgentRouter();
+        sendAgentStatus(controller, {
+          status: "routing",
+          label: "Routing request",
+        });
         const routeDecision = router.route({
           question: sanitizedQuestion,
           userEmail,
           conversationId,
           channel: "web",
+        });
+        const selectedAgentMeta = getSelectedAgentMetadata(
+          routeDecision.agent,
+          routeDecision.reason
+        );
+        sendAgentStatus(controller, {
+          agent: selectedAgentMeta,
+          status: "agent_selected",
+          label: `${selectedAgentMeta.displayName} selected`,
         });
 
         if (routeDecision.agent === "document_assistant") {
@@ -427,10 +476,12 @@ export async function POST(req: NextRequest) {
                 ]
               );
 
-              const selectedAgentMeta = getSelectedAgentMetadata(
-                routeDecision.agent,
-                routeDecision.reason
-              );
+              sendAgentStatus(controller, {
+                agent: selectedAgentMeta,
+                status: "drafting",
+                label: "Drafting response",
+                toolName: "draftDocument",
+              });
 
               sendEvent(controller, {
                 type: "done",
@@ -455,6 +506,12 @@ export async function POST(req: NextRequest) {
                   selectedAgentMeta.displayName
                 ),
                 phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
+              });
+              sendAgentStatus(controller, {
+                agent: selectedAgentMeta,
+                status: "ready",
+                label: "Ready",
+                workflowId: "document_assistant_stream",
               });
 
               controller.close();
@@ -494,6 +551,12 @@ export async function POST(req: NextRequest) {
 
         const questionEmbedding = embeddingResult.data[0].embedding;
 
+        sendAgentStatus(controller, {
+          agent: selectedAgentMeta,
+          status: "searching_sources",
+          label: "Searching approved sources",
+          toolName: "internalKnowledgeSearch",
+        });
         const matches = await db.query(
           `
           select
@@ -516,6 +579,12 @@ export async function POST(req: NextRequest) {
         );
 
         const topSimilarity = Number(matches.rows[0]?.similarity || 0);
+        sendAgentStatus(controller, {
+          agent: selectedAgentMeta,
+          status: "checking_safety",
+          label: "Checking source confidence",
+          sourceCount: matches.rows.length,
+        });
         const answerMode = getAnswerMode(topSimilarity);
         const trainingMode = isTrainingOrOnboardingRequest(question);
         const documentationMode = isDocumentationAssistantRequest(question);
@@ -633,6 +702,12 @@ ${context || "No active internal context found."}
         let fullAnswer = answerPrefix;
 
         streamText(controller, answerPrefix);
+        sendAgentStatus(controller, {
+          agent: selectedAgentMeta,
+          status: "drafting",
+          label: "Drafting response",
+          sourceCount: matches.rows.length,
+        });
 
         for await (const chunk of openAIStream) {
           const token = chunk.choices[0]?.delta?.content || "";
@@ -685,10 +760,22 @@ ${context || "No active internal context found."}
             similarity: row.similarity,
           })),
         });
+        sendAgentStatus(controller, {
+          agent: selectedAgentMeta,
+          status: "ready",
+          label: "Ready",
+          sourceCount: matches.rows.length,
+        });
 
         controller.close();
       } catch (error: any) {
         console.error("CHAT_STREAM_ERROR:", error);
+
+        sendEvent(controller, {
+          type: "agent_status",
+          status: "error",
+          label: "Agent workflow failed",
+        });
 
         sendEvent(controller, {
           type: "error",

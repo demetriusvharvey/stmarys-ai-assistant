@@ -33,6 +33,25 @@ type SelectedAgent = {
   reason?: string;
 };
 
+type AgentVisualStatus =
+  | "idle"
+  | "routing"
+  | "agent_selected"
+  | "searching_sources"
+  | "checking_safety"
+  | "drafting"
+  | "ready"
+  | "error";
+
+type AgentStatusEvent = {
+  agent?: SelectedAgent;
+  status: AgentVisualStatus;
+  label: string;
+  sourceCount?: number;
+  toolName?: string;
+  workflowId?: string;
+};
+
 type Message = {
   role: "user" | "assistant";
   content: string;
@@ -117,6 +136,302 @@ const LABEL_STYLES: Record<AnswerLabel, string> = {
   "Generated Draft": "bg-[#faf5ff] text-[#6b21a8]",
 };
 
+function isPolicyAgent(agent?: SelectedAgent | null) {
+  if (!agent) return false;
+  return (
+    agent.name === "policy" ||
+    agent.name === "internal_knowledge" ||
+    agent.displayName.toLowerCase().includes("policy")
+  );
+}
+
+function getAgentScene(agent?: SelectedAgent | null) {
+  const name = agent?.name || "";
+  const displayName = agent?.displayName?.toLowerCase() || "";
+
+  if (isPolicyAgent(agent)) return "/agent-scenes/policy-agent.png";
+  if (name === "it_support" || displayName.includes("it support")) {
+    return "/agent-scenes/it-support-agent.png";
+  }
+  if (name === "document_assistant" || displayName.includes("hr")) {
+    return "/agent-scenes/hr-agent.png";
+  }
+  if (name === "executive" || displayName.includes("executive")) {
+    return "/agent-scenes/executive-agent.png";
+  }
+  if (name === "medical_education" || displayName.includes("medical")) {
+    return "/agent-scenes/medical-education-agent.png";
+  }
+
+  return "/agent-scenes/policy-agent.png";
+}
+
+function getStatusLabel(status: AgentVisualStatus) {
+  if (status === "routing") return "Routing";
+  if (status === "agent_selected") return "Selected";
+  if (status === "searching_sources") return "Searching";
+  if (status === "checking_safety") return "Reviewing";
+  if (status === "drafting") return "Drafting";
+  if (status === "ready") return "Ready";
+  if (status === "error") return "Error";
+  return "Idle";
+}
+
+function getStatusTone(status: AgentVisualStatus) {
+  if (status === "ready") return "bg-[#dcfce7] text-[#166534]";
+  if (status === "error") return "bg-red-50 text-red-700";
+  if (status === "drafting") return "bg-[#fff4d8] text-[#9a5b00]";
+  if (status === "checking_safety") return "bg-[#e6f4f1] text-[#0f766e]";
+  if (status === "searching_sources") return "bg-[#eff6ff] text-[#1d4ed8]";
+  return "bg-[#f1f5f9] text-[#64748b]";
+}
+
+function AgentScene({
+  agent,
+  status,
+}: {
+  agent?: SelectedAgent | null;
+  status: AgentVisualStatus;
+}) {
+  const active = !["idle", "ready", "error"].includes(status);
+  const scene = getAgentScene(agent);
+
+  return (
+    <div className="relative h-[380px] overflow-hidden rounded-[2rem] border border-[#f1d7a8] bg-gradient-to-b from-[#24160d] via-[#170f09] to-[#080604] shadow-2xl shadow-black/20">
+      <style jsx>{`
+        @keyframes policy-panel-read {
+          0% {
+            transform: translateY(0);
+          }
+          100% {
+            transform: translateY(-44px);
+          }
+        }
+        @keyframes policy-panel-draft {
+          0% {
+            transform: translateY(28px);
+            opacity: 0.45;
+          }
+          100% {
+            transform: translateY(-22px);
+            opacity: 1;
+          }
+        }
+        @keyframes policy-panel-highlight {
+          0%,
+          100% {
+            transform: translateX(-18px);
+            opacity: 0.35;
+          }
+          50% {
+            transform: translateX(44px);
+            opacity: 1;
+          }
+        }
+      `}</style>
+
+      <img
+        src={scene}
+        alt={`${agent?.displayName || "AI agent"} workspace`}
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/70" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_62%_18%,rgba(253,183,26,0.20),transparent_34%),radial-gradient(circle_at_20%_42%,rgba(15,118,110,0.18),transparent_34%)]" />
+
+      <div className="absolute left-5 top-5 h-28 w-28 rounded-2xl border border-[#8b5e34]/50 bg-[#3a2415]/65 p-3 shadow-inner">
+        <div className="grid grid-cols-6 gap-1">
+          {Array.from({ length: 24 }).map((_, index) => (
+            <span
+              key={index}
+              className={[
+                "h-5 rounded-sm transition-transform duration-700",
+                active && index === 10 ? "-translate-y-3 shadow-[0_0_16px_rgba(253,183,26,0.8)]" : "",
+              ].join(" ")}
+              style={{
+                background:
+                  index % 4 === 0
+                    ? "#0f766e"
+                    : index % 4 === 1
+                      ? "#225aa9"
+                      : index % 4 === 2
+                        ? "#fdb71a"
+                        : "#e87524",
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="absolute left-7 top-[155px] h-24 w-16 rounded-xl border border-[#7b8a99] bg-[#d8e0e6] shadow-lg">
+        <span
+          className={[
+            "absolute left-2 right-2 top-5 h-2 rounded bg-[#7b8a99] transition-transform duration-700",
+            active ? "-translate-x-5" : "",
+          ].join(" ")}
+        />
+        <span className="absolute left-2 right-2 top-11 h-2 rounded bg-[#7b8a99]" />
+      </div>
+
+      <div className="absolute bottom-8 left-16 right-5 h-[150px] rounded-[2rem] border border-[#8b5e34]/70 bg-gradient-to-b from-[#dca66a] to-[#95551f] shadow-[0_28px_60px_rgba(43,25,10,0.48)]">
+        <div className="absolute left-6 top-8 flex gap-1">
+          {["#0f766e", "#225aa9", "#fdb71a"].map((color, index) => (
+            <span
+              key={color}
+              className={[
+                "h-10 w-3 rounded-sm transition-transform duration-700",
+                active && index === 2 ? "-translate-y-5 rotate-[-8deg]" : "",
+              ].join(" ")}
+              style={{ background: color }}
+            />
+          ))}
+        </div>
+
+        <div className="absolute left-[92px] top-7 h-20 w-28 rounded-xl border border-[#ead9b5] bg-white shadow-xl">
+          <span className="absolute left-4 top-4 h-1.5 w-16 rounded-full bg-[#0f766e]/70" />
+          <span className="absolute left-4 top-8 h-1.5 w-12 rounded-full bg-[#94a3b8]/45" />
+          <span className="absolute left-4 top-12 h-1.5 w-18 rounded-full bg-[#fdb71a]/80" />
+          {active && (
+            <span className="absolute left-4 top-15 h-1 w-16 animate-[policy-panel-highlight_2s_ease-in-out_infinite] rounded-full bg-[#fdb71a]" />
+          )}
+        </div>
+
+        <div className="absolute right-6 top-[-40px] h-28 w-40 overflow-hidden rounded-xl border-[8px] border-[#172033] bg-[#0f1f36] shadow-xl">
+          <div
+            className={
+              active
+                ? "absolute left-4 top-5 space-y-2 animate-[policy-panel-draft_1.8s_steps(4)_infinite]"
+                : "absolute left-4 top-5 space-y-2 animate-[policy-panel-read_5s_linear_infinite]"
+            }
+          >
+            {Array.from({ length: 8 }).map((_, index) => (
+              <span
+                key={index}
+                className="block h-1.5 rounded-full"
+                style={{
+                  width: `${42 + (index % 4) * 16}px`,
+                  backgroundColor: index % 3 === 0 ? "#00aec7" : "rgba(255,255,255,0.2)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={[
+          "absolute bottom-3 left-[138px] h-32 w-24 transition-transform duration-700",
+          active ? "translate-y-3 rotate-[3deg]" : "",
+        ].join(" ")}
+      >
+        <div className="absolute left-1/2 top-0 h-14 w-14 -translate-x-1/2 rounded-2xl bg-[#dff3ee] shadow-xl">
+          <span className="absolute left-4 top-4 h-6 w-7 rounded-t-full bg-[#0f766e]" />
+          <span className="absolute bottom-3 left-1/2 h-1.5 w-8 -translate-x-1/2 rounded-full bg-[#0f766e]/45" />
+        </div>
+        <div className="absolute bottom-8 left-1/2 h-16 w-20 -translate-x-1/2 rounded-3xl bg-[#0f766e]" />
+        <div className="absolute bottom-0 left-1/2 h-10 w-24 -translate-x-1/2 rounded-b-3xl bg-[#334155]" />
+      </div>
+    </div>
+  );
+}
+
+function WorkforcePanel({
+  agent,
+  statusEvent,
+}: {
+  agent?: SelectedAgent | null;
+  statusEvent?: AgentStatusEvent | null;
+}) {
+  const activeAgent = statusEvent?.agent || agent;
+  const status = statusEvent?.status || (activeAgent ? "ready" : "idle");
+  const statusLabel = statusEvent?.label || (activeAgent ? "Ready" : "Awaiting request");
+
+  return (
+    <aside className="hidden h-screen w-[390px] shrink-0 border-l border-[#ececec] bg-[#f7f7f5] p-4 xl:block">
+      <div className="flex h-full flex-col rounded-[2rem] border border-[#e7e2d8] bg-white/85 p-4 shadow-xl shadow-black/5">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0f766e]">
+            Workforce View
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-[#111827]">
+            {activeAgent?.displayName ?? "Awaiting agent"}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-[#64748b]">
+            {activeAgent
+              ? activeAgent.reason || "Selected by the backend AgentRouter."
+              : "Ask a question and the selected AI worker will appear here."}
+          </p>
+        </div>
+
+        <AgentScene agent={activeAgent} status={status} />
+
+        <div className="mt-4 rounded-2xl border border-[#e7e2d8] bg-[#fffaf0] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#9a5b00]">
+                Current work state
+              </p>
+              <p className="mt-1 text-sm font-semibold text-[#111827]">
+                {statusLabel}
+              </p>
+              {typeof statusEvent?.sourceCount === "number" && (
+                <p className="mt-1 text-xs text-[#64748b]">
+                  {statusEvent.sourceCount} sources considered
+                </p>
+              )}
+            </div>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(
+                status
+              )}`}
+            >
+              {getStatusLabel(status)}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2">
+          {[
+            ["routing", "Routing request"],
+            ["searching_sources", "Source retrieval"],
+            ["checking_safety", "Review"],
+            ["drafting", "Drafting"],
+            ["ready", "Complete"],
+          ].map(([step, label]) => {
+            const currentIndex = [
+              "routing",
+              "agent_selected",
+              "searching_sources",
+              "checking_safety",
+              "drafting",
+              "ready",
+            ].indexOf(status);
+            const stepIndex = [
+              "routing",
+              "searching_sources",
+              "checking_safety",
+              "drafting",
+              "ready",
+            ].indexOf(step);
+            const complete = currentIndex >= stepIndex && currentIndex >= 0;
+            return (
+              <div key={step} className="flex items-center gap-2 text-xs">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    complete ? "bg-[#0f766e]" : "bg-[#cbd5e1]"
+                  }`}
+                />
+                <span className={complete ? "text-[#0f172a]" : "text-[#94a3b8]"}>
+                  {label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -133,6 +448,7 @@ export default function Home() {
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [workforceStatus, setWorkforceStatus] = useState<AgentStatusEvent | null>(null);
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; role: string } | null>(null);
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(d => d && setCurrentUser(d.user));
@@ -140,6 +456,10 @@ export default function Home() {
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const latestAssistantMessage =
+    [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  const activeWorkforceAgent =
+    workforceStatus?.agent || latestAssistantMessage?.selectedAgent || null;
 
   useEffect(() => {
     loadConversations();
@@ -457,6 +777,10 @@ export default function Home() {
       setSelectedImage(null);
       setImagePreviewUrl(null);
       setLoading(true);
+      setWorkforceStatus({
+        status: "routing",
+        label: "Routing request",
+      });
 
       await saveMessage(
         conversationId,
@@ -493,6 +817,11 @@ export default function Home() {
             selectedAgent: data.success ? data.selectedAgent : undefined,
           },
         ]);
+        setWorkforceStatus({
+          agent: data.success ? data.selectedAgent : undefined,
+          status: data.success ? "ready" : "error",
+          label: data.success ? "Ready" : "Image analysis failed",
+        });
 
         await saveMessage(
           conversationId,
@@ -556,6 +885,18 @@ export default function Home() {
 
           const payload = JSON.parse(line.replace("data: ", ""));
 
+          if (payload.type === "agent_status") {
+            setWorkforceStatus({
+              agent: payload.agent,
+              status: payload.status || "idle",
+              label: payload.label || getStatusLabel(payload.status || "idle"),
+              sourceCount: payload.sourceCount,
+              toolName: payload.toolName,
+              workflowId: payload.workflowId,
+            });
+            continue;
+          }
+
           if (payload.type === "token") {
             assistantContent += payload.token || "";
 
@@ -579,6 +920,13 @@ export default function Home() {
             assistantSources = payload.sources || [];
             assistantEscalation = payload.escalation || null;
             assistantTrainingMode = payload.trainingMode || false;
+            setWorkforceStatus({
+              agent: payload.selectedAgent,
+              status: "ready",
+              label: "Ready",
+              sourceCount: Array.isArray(payload.sources) ? payload.sources.length : undefined,
+              workflowId: payload.workflow?.id,
+            });
 
             setMessages((prev) => {
               const updatedMessages = [...prev];
@@ -602,6 +950,10 @@ export default function Home() {
           }
 
           if (payload.type === "error") {
+            setWorkforceStatus({
+              status: "error",
+              label: payload.error || "Agent workflow failed",
+            });
             throw new Error(payload.error || "Streaming failed");
           }
         }
@@ -614,6 +966,10 @@ export default function Home() {
         assistantSources
       );
     } catch (error: any) {
+      setWorkforceStatus({
+        status: "error",
+        label: error.message || "Agent workflow failed",
+      });
       setMessages((prev) => [
         ...prev,
         {
@@ -780,13 +1136,23 @@ export default function Home() {
                 </button>
               </div>
               {(currentUser?.role === "admin" || currentUser?.role === "it_staff") && (
-                <a
-                  href="/admin/users"
-                  className="mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
-                >
-                  <span>⚙</span>
-                  <span>Manage accounts</span>
-                </a>
+                <div className="mt-1 space-y-0.5">
+                  <a
+                    href="/admin/agents"
+                    className="flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
+                  >
+                    <span>✦</span>
+                    <span>Command Center</span>
+                  </a>
+
+                  <a
+                    href="/admin/users"
+                    className="flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
+                  >
+                    <span>⚙</span>
+                    <span>Manage accounts</span>
+                  </a>
+                </div>
               )}
             </div>
           )}
@@ -1274,6 +1640,8 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        <WorkforcePanel agent={activeWorkforceAgent} statusEvent={workforceStatus} />
       </div>
     </main>
   );
