@@ -59,7 +59,9 @@ export class DocumentAssistantAgent implements Agent {
     const draft = toolResult.success ? getDraftFromToolData(toolResult.data) : null;
 
     return {
-      answer: draft || "Document Assistant Agent could not generate a draft.",
+      answer:
+        draft ||
+        "## Draft Unavailable\n\nDocument Assistant Agent could not generate a draft.",
       agent: this.name,
       mode: this.mode,
       sources: [],

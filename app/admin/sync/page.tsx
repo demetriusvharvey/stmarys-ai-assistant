@@ -38,6 +38,15 @@ type DashboardData = {
   chunks: {
     total_chunks: number;
   };
+  unreadableDocuments: number;
+  unreadablePreview: {
+    id: string;
+    title: string;
+    category: string | null;
+    source: string;
+    source_url: string | null;
+    created_at: string;
+  }[];
   recentFailures: Failure[];
   recentJobs: Job[];
 };
@@ -72,6 +81,19 @@ type ReconcileResult = {
   }[];
 };
 
+type ReindexResult = {
+  success: boolean;
+  jobId?: string;
+  queued: number;
+  message?: string;
+  documents?: {
+    id: string;
+    title: string;
+    category: string | null;
+    sourceUrl: string | null;
+  }[];
+};
+
 export default function SyncAdminPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,6 +105,7 @@ export default function SyncAdminPage() {
   const [lastReconcile, setLastReconcile] = useState<ReconcileResult | null>(
     null
   );
+  const [reindexing, setReindexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const stopAutoRef = useRef(false);
@@ -169,6 +192,51 @@ export default function SyncAdminPage() {
       setError(err.message || "Failed to retry failed files");
     } finally {
       setProcessing(false);
+    }
+  }
+
+  async function reindexUnreadableDocs() {
+    setReindexing(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/sharepoint/sync/reindex-unreadable", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          limit: 500,
+        }),
+      });
+
+      const json = (await res.json()) as ReindexResult;
+
+      if (!json.success) {
+        throw new Error(
+          (json as { error?: string }).error ||
+            "Failed to queue unreadable documents"
+        );
+      }
+
+      setLastResult({
+        success: true,
+        processed: 0,
+        failed: 0,
+        message:
+          json.message ||
+          `${json.queued} unreadable documents queued for reindexing.`,
+        results: (json.documents || []).map((document) => ({
+          file: document.title,
+          status: "pending",
+        })),
+      });
+
+      await loadDashboard();
+    } catch (err: any) {
+      setError(err.message || "Failed to queue unreadable documents");
+    } finally {
+      setReindexing(false);
     }
   }
 
@@ -269,7 +337,9 @@ export default function SyncAdminPage() {
   const progress =
     totalQueued > 0 ? Math.round((synced / totalQueued) * 100) : 0;
 
-  const controlsDisabled = processing || autoProcessing || reconciling;
+  const unreadableDocuments = Number(data?.unreadableDocuments || 0);
+  const controlsDisabled =
+    processing || autoProcessing || reconciling || reindexing;
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-slate-900">
@@ -329,7 +399,7 @@ export default function SyncAdminPage() {
           </div>
         )}
 
-        <section className="mb-6 grid gap-4 md:grid-cols-5">
+        <section className="mb-6 grid gap-4 md:grid-cols-6">
           <StatCard
             label="Documents"
             value={data?.documents?.total_documents || 0}
@@ -343,6 +413,7 @@ export default function SyncAdminPage() {
           <StatCard label="Pending" value={pending} />
           <StatCard label="Synced" value={synced} />
           <StatCard label="Failed" value={failed} />
+          <StatCard label="Unreadable" value={unreadableDocuments} />
         </section>
 
         <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -387,6 +458,14 @@ export default function SyncAdminPage() {
               </button>
 
               <button
+                onClick={reindexUnreadableDocs}
+                disabled={controlsDisabled || unreadableDocuments === 0}
+                className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reindexing ? "Queueing..." : "Reindex Unreadable Docs"}
+              </button>
+
+              <button
                 onClick={reconcileDeletedDocs}
                 disabled={controlsDisabled}
                 className="rounded-xl bg-purple-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -424,8 +503,72 @@ export default function SyncAdminPage() {
             <span>Progress: {progress}%</span>
             <span>Processing: {processingCount}</span>
             <span>Total queued: {totalQueued.toLocaleString()}</span>
+            <span>
+              Unreadable active SharePoint docs:{" "}
+              {unreadableDocuments.toLocaleString()}
+            </span>
           </div>
         </section>
+
+        {unreadableDocuments > 0 && (
+          <section className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+            <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-amber-950">
+                  Documents Need Reindexing
+                </h2>
+                <p className="mt-1 max-w-3xl text-sm text-amber-900">
+                  These active SharePoint documents are visible in the Knowledge
+                  Library, but have zero searchable chunks. The AI cannot read
+                  or summarize them until they are reprocessed.
+                </p>
+              </div>
+
+              <button
+                onClick={reindexUnreadableDocs}
+                disabled={controlsDisabled}
+                className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reindexing ? "Queueing..." : "Queue Reindex"}
+              </button>
+            </div>
+
+            <div className="max-h-60 overflow-auto rounded-xl border border-amber-200 bg-white">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-amber-100 text-xs uppercase text-amber-900">
+                  <tr>
+                    <th className="px-4 py-3">Document</th>
+                    <th className="px-4 py-3">Category</th>
+                    <th className="px-4 py-3">Source</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {(data?.unreadablePreview || []).map((doc) => (
+                    <tr key={doc.id} className="border-t border-amber-100">
+                      <td className="px-4 py-3 font-medium">{doc.title}</td>
+                      <td className="px-4 py-3">{doc.category || "-"}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {doc.source_url ? (
+                          <a
+                            href={doc.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-teal-700 underline"
+                          >
+                            SharePoint
+                          </a>
+                        ) : (
+                          doc.source
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         {lastReconcile && (
           <section className="mb-6 rounded-2xl border border-purple-200 bg-white p-5 shadow-sm">

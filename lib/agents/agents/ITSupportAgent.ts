@@ -222,7 +222,8 @@ export class ITSupportAgent implements Agent {
 
         if (!isComplete) {
           return {
-            answer: "I couldn't recover the ticket details from our conversation. Could you describe the issue again so I can submit it?",
+            answer:
+              "## Ticket Details Needed\n\nI couldn't recover the ticket details from our conversation.\n\nPlease describe the issue again so I can submit it.",
             agent: this.name,
             mode: this.mode,
             sources: [],
@@ -308,7 +309,8 @@ export class ITSupportAgent implements Agent {
 
       if (isCancellation(question)) {
         return {
-          answer: "No problem — the ticket has been cancelled. Let me know if you need anything else.",
+          answer:
+            "## Ticket Cancelled\n\nNo problem. The ticket has been cancelled.\n\nLet me know if you need anything else.",
           agent: this.name,
           mode: this.mode,
           sources: [],
@@ -333,7 +335,8 @@ export class ITSupportAgent implements Agent {
       // Clarifying questions — ask one at a time
       if (!ticket.requesterEmail) {
         return {
-          answer: "I can help you submit an IT ticket. First, what's your email address?",
+          answer:
+            "## IT Ticket Request\n\nI can help you submit an IT ticket.\n\n**First:** what is your email address?",
           agent: this.name,
           mode: this.mode,
           sources: [],
@@ -345,7 +348,8 @@ export class ITSupportAgent implements Agent {
 
       if (!ticket.locationUnit || ticket.locationUnit.trim().length < 2) {
         return {
-          answer: "Got it. Which unit, floor, or area are you located in?",
+          answer:
+            "## Location Needed\n\nGot it.\n\n**Which unit, floor, or area are you located in?**",
           agent: this.name,
           mode: this.mode,
           sources: [],
@@ -357,7 +361,8 @@ export class ITSupportAgent implements Agent {
 
       if (!ticket.description || ticket.description.trim().length < 20) {
         return {
-          answer: "Can you describe the issue in a bit more detail so I can include it in the ticket?",
+          answer:
+            "## Issue Details Needed\n\nCan you describe the issue in a bit more detail so I can include it in the ticket?",
           agent: this.name,
           mode: this.mode,
           sources: [],
@@ -409,7 +414,8 @@ export class ITSupportAgent implements Agent {
     await this.toolRegistry.call("searchITKnowledge", { query: question }, toolContext);
 
     return {
-      answer: "I'm the IT Support assistant. I can help with technical issues, software problems, account access, and more — or I can submit an IT helpdesk ticket for you. What do you need help with?",
+      answer:
+        "## IT Support\n\nI can help with technical issues, software problems, account access, and IT helpdesk tickets.\n\nWhat do you need help with?",
       agent: this.name,
       mode: this.mode,
       sources: [],

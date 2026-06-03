@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
     const { cleanText: cleanSubject } = deIdentifyText(subject);
     const { cleanText: cleanDesc } = deIdentifyText(description);
-    const category = resolveCategory(\`\${cleanSubject} \${cleanDesc}\`).category;
+    const category = resolveCategory(`${cleanSubject} ${cleanDesc}`).category;
 
     const result = await client.createIssue({
       subject: cleanSubject,

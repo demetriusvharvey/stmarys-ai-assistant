@@ -27,7 +27,8 @@ export class InternalKnowledgeAgent implements Agent {
     );
 
     return {
-      answer: "Internal Knowledge Agent is not wired yet.",
+      answer:
+        "## Internal Knowledge\n\nInternal Knowledge Agent is not wired yet.",
       agent: this.name,
       mode: this.mode,
       sources: [],

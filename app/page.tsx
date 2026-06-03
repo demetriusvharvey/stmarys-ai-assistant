@@ -15,7 +15,7 @@ type Source = {
   title: string;
   category: string;
   source: string;
-  sourceUrl: string;
+  sourceUrl: string | null;
   similarity: number;
 };
 
@@ -31,25 +31,6 @@ type SelectedAgent = {
   displayName: string;
   icon: string;
   reason?: string;
-};
-
-type AgentVisualStatus =
-  | "idle"
-  | "routing"
-  | "agent_selected"
-  | "searching_sources"
-  | "checking_safety"
-  | "drafting"
-  | "ready"
-  | "error";
-
-type AgentStatusEvent = {
-  agent?: SelectedAgent;
-  status: AgentVisualStatus;
-  label: string;
-  sourceCount?: number;
-  toolName?: string;
-  workflowId?: string;
 };
 
 type Message = {
@@ -100,14 +81,36 @@ function urgencyLabel(urgency: Escalation["urgency"]) {
 }
 
 
-function getStrongSources(sources?: Source[]) {
+function getVisibleSources(sources?: Source[]) {
   if (!sources || sources.length === 0) return [];
 
-  const sortedSources = [...sources]
-    .filter((source) => Number(source.similarity || 0) >= 0.7)
-    .sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
+  const uniqueSources = new Map<string, Source>();
 
-  return sortedSources.slice(0, 4);
+  for (const source of sources) {
+    const key = source.documentId || source.id || source.title;
+    const existing = uniqueSources.get(key);
+
+    if (
+      !existing ||
+      Number(source.similarity || 0) > Number(existing.similarity || 0)
+    ) {
+      uniqueSources.set(key, source);
+    }
+  }
+
+  return [...uniqueSources.values()]
+    .sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
+}
+
+function getSourceOpenUrl(source: Source) {
+  if (source.sourceUrl) return source.sourceUrl;
+
+  return null;
+}
+
+function getSourceLocationLabel(source: Source) {
+  if (source.sourceUrl) return source.sourceUrl;
+  return "SharePoint link unavailable";
 }
 
 const ANSWER_LABEL_PREFIXES = [
@@ -129,350 +132,44 @@ function extractAnswerLabel(content: string): { label: AnswerLabel | null; body:
   return { label: null, body: content };
 }
 
+function normalizeAssistantMarkdown(content: string) {
+  const sectionLabels = new Set([
+    "Purpose",
+    "Retention Period",
+    "Records Covered",
+    "Specific Records",
+    "Additional Records",
+    "Source Note",
+    "Next Step",
+    "Steps",
+    "Quick Checks",
+    "Likely Causes",
+    "Escalation",
+  ]);
+  const sectionPattern = [...sectionLabels].join("|");
+  return content
+    .trim()
+    .replace(/^\s*\*\*\s*$/gm, "")
+    .replace(/^\s*\*\*\s+/gm, "")
+    .replace(/\s+\*\*\s*$/gm, "")
+    .replace(
+      new RegExp(`\\n?(${sectionPattern})\\s*:\\s*`, "g"),
+      "\n\n### $1\n\n"
+    )
+    .replace(
+      /\n([A-Z][A-Za-z\s-]{4,60}(?:Overview|Summary|Policy|Procedure|Guidance))\n/g,
+      "\n\n### $1\n\n"
+    )
+    .replace(/\n(?=###\s)/g, "\n\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 const LABEL_STYLES: Record<AnswerLabel, string> = {
   "General Knowledge": "bg-[#f1f5f9] text-[#64748b]",
   "Internal Source Summary": "bg-[#ecfdf5] text-[#065f46]",
   "Troubleshooting Guidance": "bg-[#eff6ff] text-[#1d4ed8]",
   "Generated Draft": "bg-[#faf5ff] text-[#6b21a8]",
 };
-
-function isPolicyAgent(agent?: SelectedAgent | null) {
-  if (!agent) return false;
-  return (
-    agent.name === "policy" ||
-    agent.name === "internal_knowledge" ||
-    agent.displayName.toLowerCase().includes("policy")
-  );
-}
-
-function getAgentScene(agent?: SelectedAgent | null) {
-  const name = agent?.name || "";
-  const displayName = agent?.displayName?.toLowerCase() || "";
-
-  if (isPolicyAgent(agent)) return "/agent-scenes/policy-agent.png";
-  if (name === "it_support" || displayName.includes("it support")) {
-    return "/agent-scenes/it-support-agent.png";
-  }
-  if (name === "document_assistant" || displayName.includes("hr")) {
-    return "/agent-scenes/hr-agent.png";
-  }
-  if (name === "executive" || displayName.includes("executive")) {
-    return "/agent-scenes/executive-agent.png";
-  }
-  if (name === "medical_education" || displayName.includes("medical")) {
-    return "/agent-scenes/medical-education-agent.png";
-  }
-
-  return null;
-}
-
-function getStatusLabel(status: AgentVisualStatus) {
-  if (status === "routing") return "Routing";
-  if (status === "agent_selected") return "Selected";
-  if (status === "searching_sources") return "Searching";
-  if (status === "checking_safety") return "Reviewing";
-  if (status === "drafting") return "Drafting";
-  if (status === "ready") return "Ready";
-  if (status === "error") return "Error";
-  return "Idle";
-}
-
-function getStatusTone(status: AgentVisualStatus) {
-  if (status === "ready") return "bg-[#dcfce7] text-[#166534]";
-  if (status === "error") return "bg-red-50 text-red-700";
-  if (status === "drafting") return "bg-[#fff4d8] text-[#9a5b00]";
-  if (status === "checking_safety") return "bg-[#e6f4f1] text-[#0f766e]";
-  if (status === "searching_sources") return "bg-[#eff6ff] text-[#1d4ed8]";
-  return "bg-[#f1f5f9] text-[#64748b]";
-}
-
-function AgentScene({
-  agent,
-  status,
-}: {
-  agent?: SelectedAgent | null;
-  status: AgentVisualStatus;
-}) {
-  const scene = getAgentScene(agent);
-
-  if (!agent || !scene) {
-    return (
-      <div className="flex h-[390px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-[#d8dedc] bg-[linear-gradient(135deg,#f9faf8,#eef7f5)] p-8 text-center">
-        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-2xl text-[#0f766e] shadow-sm ring-1 ring-[#e5ece9]">
-          ✦
-        </div>
-        <p className="text-base font-semibold text-[#111827]">No agent active</p>
-        <p className="mt-2 max-w-[260px] text-sm leading-6 text-[#64748b]">
-          Ask a question and the assigned AI worker will appear here.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-[#e7e2d8] bg-[#111827] shadow-2xl shadow-black/15">
-      <img
-        src={scene}
-        alt={`${agent.displayName} workspace`}
-        className="h-[390px] w-full object-cover"
-      />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
-      <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-white/15 bg-black/45 p-3 text-white shadow-lg backdrop-blur-md">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">
-              {agent.icon} {agent.displayName}
-            </p>
-            <p className="mt-1 text-xs text-white/75">{getStatusLabel(status)}</p>
-          </div>
-          <span
-            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(
-              status
-            )}`}
-          >
-            {status === "ready" ? "Ready" : "Live"}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const WORKFORCE_STEPS: Array<{
-  status: AgentVisualStatus;
-  label: string;
-}> = [
-  { status: "routing", label: "Routing" },
-  { status: "searching_sources", label: "Source retrieval" },
-  { status: "checking_safety", label: "Review" },
-  { status: "drafting", label: "Drafting" },
-  { status: "ready", label: "Complete" },
-];
-
-function getStepState(step: AgentVisualStatus, currentStatus: AgentVisualStatus) {
-  const order = [
-    "routing",
-    "agent_selected",
-    "searching_sources",
-    "checking_safety",
-    "drafting",
-    "ready",
-  ];
-  const currentIndex = order.indexOf(currentStatus);
-  const stepIndex = order.indexOf(step);
-
-  if (currentIndex < 0 || stepIndex < 0) return "pending";
-  if (currentStatus === step) return "active";
-  if (currentIndex > stepIndex) return "complete";
-  return "pending";
-}
-
-function AgentWorkTimeline({ status }: { status: AgentVisualStatus }) {
-  return (
-    <div className="rounded-2xl border border-[#e7e2d8] bg-white p-4">
-      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-[#64748b]">
-        Task progress
-      </p>
-      <div className="grid gap-3">
-        {WORKFORCE_STEPS.map(({ status: step, label }) => {
-          const stepState = getStepState(step, status);
-          return (
-            <div key={step} className="flex items-center gap-3 text-sm">
-              <span
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                  stepState === "active"
-                    ? "border-[#0f766e] bg-[#0f766e] shadow-[0_0_0_4px_rgba(15,118,110,0.12)]"
-                    : stepState === "complete"
-                      ? "border-[#0f766e] bg-[#e6f4f1]"
-                      : "border-[#cbd5e1] bg-white"
-                }`}
-              >
-                {stepState === "complete" && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#0f766e]" />
-                )}
-              </span>
-              <span
-                className={
-                  stepState === "pending"
-                    ? "font-medium text-[#94a3b8]"
-                    : "font-semibold text-[#0f172a]"
-                }
-              >
-                {label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function AgentWorkingCard({
-  agent,
-  status,
-  label,
-  sourceCount,
-  onViewWork,
-}: {
-  agent: SelectedAgent;
-  status: AgentVisualStatus;
-  label: string;
-  sourceCount?: number;
-  onViewWork: () => void;
-}) {
-  return (
-    <div className="mt-7 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-sm ring-1 ring-[#e5e7eb]">
-            {agent.icon}
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-[#111827]">
-              {agent.displayName}
-            </p>
-            <p className="mt-0.5 truncate text-xs text-[#64748b]">
-              {label}
-              {typeof sourceCount === "number" && sourceCount > 0
-                ? ` · ${sourceCount} sources`
-                : ""}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(
-              status
-            )}`}
-          >
-            {getStatusLabel(status)}
-          </span>
-          <button
-            type="button"
-            onClick={onViewWork}
-            className="rounded-full border border-[#d8dedc] bg-white px-3 py-1.5 text-xs font-semibold text-[#0f766e] transition hover:border-[#0f766e] hover:bg-[#e6f4f1]"
-          >
-            View work
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkforceDrawer({
-  open,
-  onClose,
-  agent,
-  statusEvent,
-}: {
-  open: boolean;
-  onClose: () => void;
-  agent?: SelectedAgent | null;
-  statusEvent?: AgentStatusEvent | null;
-}) {
-  const activeAgent = statusEvent?.agent || agent;
-  const status = statusEvent?.status || (activeAgent ? "ready" : "idle");
-  const statusLabel = statusEvent?.label || (activeAgent ? "Ready" : "Awaiting request");
-
-  if (!open || !activeAgent) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm">
-      <div className="absolute inset-x-0 bottom-0 max-h-[92vh] overflow-y-auto rounded-t-[2rem] bg-[#f7f7f5] p-4 shadow-2xl transition-transform duration-300 sm:p-5 xl:inset-y-0 xl:left-auto xl:right-0 xl:h-full xl:max-h-none xl:w-[640px] xl:rounded-l-[2rem] xl:rounded-tr-none 2xl:w-[700px]">
-        <div className="flex min-h-full flex-col rounded-[1.75rem] border border-[#e7e2d8] bg-white/95 p-5 shadow-xl shadow-black/10">
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0f766e]">
-                Workforce View
-              </p>
-              <h2 className="mt-1 text-2xl font-semibold text-[#111827]">
-                {activeAgent.icon} {activeAgent.displayName}
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-[#64748b]">
-                {activeAgent.reason || "Selected by the backend AgentRouter."}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#e5e7eb] bg-white text-lg text-[#64748b] transition hover:border-[#cbd5e1] hover:text-[#111827]"
-              aria-label="Close Workforce View"
-            >
-              ×
-            </button>
-          </div>
-
-          <AgentScene agent={activeAgent} status={status} />
-
-          <div className="mt-4 rounded-2xl border border-[#e7e2d8] bg-[#fffaf0] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#9a5b00]">
-                  Current work state
-                </p>
-                <p className="mt-1 text-base font-semibold text-[#111827]">
-                  {statusLabel}
-                </p>
-                {typeof statusEvent?.sourceCount === "number" && (
-                  <p className="mt-1 text-sm text-[#64748b]">
-                    {statusEvent.sourceCount} sources considered
-                  </p>
-                )}
-              </div>
-              <span
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${getStatusTone(
-                  status
-                )}`}
-              >
-                {getStatusLabel(status)}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <AgentWorkTimeline status={status} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FloatingWorkforceButton({
-  agent,
-  status,
-  onClick,
-}: {
-  agent?: SelectedAgent | null;
-  status: AgentVisualStatus;
-  onClick: () => void;
-}) {
-  if (!agent) return null;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fixed bottom-24 right-5 z-40 hidden items-center gap-3 rounded-full border border-[#d8dedc] bg-white/95 px-4 py-3 text-sm font-semibold text-[#111827] shadow-xl shadow-black/10 backdrop-blur transition hover:-translate-y-0.5 hover:border-[#0f766e] xl:flex"
-    >
-      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#e6f4f1] text-lg">
-        {agent.icon}
-      </span>
-      <span>
-        {agent.displayName} · {getStatusLabel(status)}
-      </span>
-      <span
-        className={`rounded-full px-2 py-1 text-[10px] font-semibold ${getStatusTone(
-          status
-        )}`}
-      >
-        {getStatusLabel(status)}
-      </span>
-    </button>
-  );
-}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
@@ -490,10 +187,6 @@ export default function Home() {
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [workforceStatus, setWorkforceStatus] = useState<AgentStatusEvent | null>(null);
-  const [workforceDrawerOpen, setWorkforceDrawerOpen] = useState(false);
-  const [drawerAgent, setDrawerAgent] = useState<SelectedAgent | null>(null);
-  const [drawerStatus, setDrawerStatus] = useState<AgentStatusEvent | null>(null);
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; role: string } | null>(null);
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(d => d && setCurrentUser(d.user));
@@ -501,20 +194,6 @@ export default function Home() {
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const workforceDrawerModeRef = useRef<"auto" | "manual" | null>(null);
-  const workforceCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-  const latestAssistantMessage =
-    [...messages].reverse().find((message) => message.role === "assistant") ?? null;
-  const activeWorkforceAgent =
-    workforceStatus?.agent || latestAssistantMessage?.selectedAgent || null;
-  const activeWorkforceStatus = workforceStatus?.status || (activeWorkforceAgent ? "ready" : "idle");
-  const drawerStatusEvent =
-    drawerStatus ??
-    (drawerAgent?.name && drawerAgent.name === activeWorkforceAgent?.name
-      ? workforceStatus
-      : null);
 
   useEffect(() => {
     loadConversations();
@@ -525,61 +204,6 @@ export default function Home() {
       behavior: "smooth",
     });
   }, [messages, loading]);
-
-  useEffect(() => {
-    return () => {
-      if (workforceCloseTimerRef.current) {
-        clearTimeout(workforceCloseTimerRef.current);
-      }
-    };
-  }, []);
-
-  function openWorkforceDrawer(
-    agent: SelectedAgent,
-    statusEvent?: AgentStatusEvent | null,
-    mode: "auto" | "manual" = "manual"
-  ) {
-    if (workforceCloseTimerRef.current) {
-      clearTimeout(workforceCloseTimerRef.current);
-      workforceCloseTimerRef.current = null;
-    }
-
-    workforceDrawerModeRef.current = mode;
-    setDrawerAgent(agent);
-    setDrawerStatus(
-      statusEvent ?? {
-        agent,
-        status: "ready",
-        label: "Ready",
-      }
-    );
-    setWorkforceDrawerOpen(true);
-  }
-
-  function closeWorkforceDrawer() {
-    if (workforceCloseTimerRef.current) {
-      clearTimeout(workforceCloseTimerRef.current);
-      workforceCloseTimerRef.current = null;
-    }
-
-    workforceDrawerModeRef.current = null;
-    setWorkforceDrawerOpen(false);
-  }
-
-  function scheduleAutoCloseWorkforceDrawer() {
-    if (workforceDrawerModeRef.current !== "auto") return;
-
-    if (workforceCloseTimerRef.current) {
-      clearTimeout(workforceCloseTimerRef.current);
-    }
-
-    workforceCloseTimerRef.current = setTimeout(() => {
-      if (workforceDrawerModeRef.current === "auto") {
-        workforceDrawerModeRef.current = null;
-        setWorkforceDrawerOpen(false);
-      }
-    }, 2600);
-  }
 
   function handleImageSelect(file: File | null) {
     setSelectedImage(file);
@@ -887,12 +511,6 @@ export default function Home() {
       setSelectedImage(null);
       setImagePreviewUrl(null);
       setLoading(true);
-      const routingStatus: AgentStatusEvent = {
-        status: "routing",
-        label: "Routing request",
-      };
-      setWorkforceStatus(routingStatus);
-
       await saveMessage(
         conversationId,
         "user",
@@ -928,12 +546,6 @@ export default function Home() {
             selectedAgent: data.success ? data.selectedAgent : undefined,
           },
         ]);
-        setWorkforceStatus({
-          agent: data.success ? data.selectedAgent : undefined,
-          status: data.success ? "ready" : "error",
-          label: data.success ? "Ready" : "Image analysis failed",
-        });
-
         await saveMessage(
           conversationId,
           "assistant",
@@ -997,29 +609,6 @@ export default function Home() {
           const payload = JSON.parse(line.replace("data: ", ""));
 
           if (payload.type === "agent_status") {
-            const nextStatus: AgentStatusEvent = {
-              agent: payload.agent,
-              status: payload.status || "idle",
-              label: payload.label || getStatusLabel(payload.status || "idle"),
-              sourceCount: payload.sourceCount,
-              toolName: payload.toolName,
-              workflowId: payload.workflowId,
-            };
-
-            setWorkforceStatus(nextStatus);
-
-            if (nextStatus.agent) {
-              setDrawerAgent(nextStatus.agent);
-              setDrawerStatus(null);
-
-              if (nextStatus.status !== "ready" && workforceDrawerModeRef.current !== "manual") {
-                openWorkforceDrawer(nextStatus.agent, nextStatus, "auto");
-              }
-
-              if (nextStatus.status === "ready") {
-                scheduleAutoCloseWorkforceDrawer();
-              }
-            }
             continue;
           }
 
@@ -1046,21 +635,6 @@ export default function Home() {
             assistantSources = payload.sources || [];
             assistantEscalation = payload.escalation || null;
             assistantTrainingMode = payload.trainingMode || false;
-            const readyStatus: AgentStatusEvent = {
-              agent: payload.selectedAgent,
-              status: "ready",
-              label: "Ready",
-              sourceCount: Array.isArray(payload.sources) ? payload.sources.length : undefined,
-              workflowId: payload.workflow?.id,
-            };
-
-            setWorkforceStatus(readyStatus);
-
-            if (readyStatus.agent) {
-              setDrawerAgent(readyStatus.agent);
-              setDrawerStatus(null);
-              scheduleAutoCloseWorkforceDrawer();
-            }
 
             setMessages((prev) => {
               const updatedMessages = [...prev];
@@ -1084,10 +658,6 @@ export default function Home() {
           }
 
           if (payload.type === "error") {
-            setWorkforceStatus({
-              status: "error",
-              label: payload.error || "Agent workflow failed",
-            });
             throw new Error(payload.error || "Streaming failed");
           }
         }
@@ -1100,10 +670,6 @@ export default function Home() {
         assistantSources
       );
     } catch (error: any) {
-      setWorkforceStatus({
-        status: "error",
-        label: error.message || "Agent workflow failed",
-      });
       setMessages((prev) => [
         ...prev,
         {
@@ -1208,10 +774,25 @@ export default function Home() {
 
           <div className={`mt-5 min-h-0 flex-1 ${sidebarCollapsed ? "px-2" : "px-2"}`}>
             {!sidebarCollapsed && (
-              <div className="mb-1 px-2">
+              <div className="mb-1 flex items-center justify-between px-2">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-[#9ca3af]">
                   Recent
                 </p>
+                {conversations.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm("Clear all conversations?")) return;
+                      await fetch("/api/conversations/clear", { method: "DELETE" });
+                      setConversations([]);
+                      setActiveConversationId(null);
+                      setMessages([STARTER_MESSAGE]);
+                    }}
+                    className="text-[10px] font-medium text-[#9ca3af] hover:text-red-500 transition"
+                    title="Clear all conversations"
+                  >
+                    Clear all
+                  </button>
+                )}
               </div>
             )}
 
@@ -1381,44 +962,16 @@ export default function Home() {
                             className={
                               message.role === "user"
                                 ? "prose prose-sm prose-invert max-w-none"
-                                : "prose max-w-none text-[15.5px] leading-[1.85] text-[#1c1c1c] prose-headings:mb-4 prose-headings:mt-9 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-[#0f172a] prose-h1:text-[1.25rem] prose-h2:text-[1.1rem] prose-h3:text-[1rem] prose-p:my-[1.1rem] prose-p:leading-[1.85] prose-li:my-[0.55rem] prose-li:leading-[1.8] prose-ul:my-5 prose-ol:my-5 prose-ul:pl-5 prose-ol:pl-5 prose-pre:rounded-xl prose-pre:bg-[#f6f8fa] prose-pre:text-sm prose-code:rounded prose-code:bg-[#f1f5f9] prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:text-[#c7254e] prose-strong:font-semibold prose-strong:text-[#0f172a] prose-blockquote:border-l-2 prose-blockquote:border-[#e2e8f0] prose-blockquote:pl-4 prose-blockquote:text-[#64748b] prose-blockquote:not-italic"
+                                : "assistant-answer prose max-w-none rounded-2xl border border-[#e5e7eb] bg-white px-6 py-6 text-[15px] leading-7 text-[#1f2937] shadow-sm prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-[#0f766e] prose-headings:mt-8 prose-headings:mb-2 prose-h1:text-[1.4rem] prose-h2:text-[1.25rem] prose-h3:text-[1.1rem] prose-p:my-3 prose-p:leading-7 prose-li:my-1.5 prose-li:leading-7 prose-ul:my-3 prose-ol:my-3 prose-ul:pl-6 prose-ol:pl-6 prose-li:marker:text-[#0f766e] prose-hr:my-6 prose-hr:border-[#e5e7eb] prose-a:font-medium prose-a:text-[#0f766e] prose-a:underline prose-a:underline-offset-2 prose-pre:rounded-xl prose-pre:bg-[#f6f8fa] prose-pre:text-sm prose-code:rounded prose-code:bg-[#f1f5f9] prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:text-[#c7254e] prose-strong:font-semibold prose-strong:text-[#0f172a] prose-blockquote:my-5 prose-blockquote:rounded-xl prose-blockquote:border-l-4 prose-blockquote:border-[#99f6e4] prose-blockquote:bg-[#f0fdfa] prose-blockquote:px-4 prose-blockquote:py-3 prose-blockquote:text-[#334155] prose-blockquote:not-italic"
                             }
                           >
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {message.role === "assistant" ? msgBody : message.content}
+                              {message.role === "assistant"
+                                ? normalizeAssistantMarkdown(msgBody)
+                                : message.content}
                             </ReactMarkdown>
                           </div>
                         </div>
-                      )}
-
-                      {message.role === "assistant" && message.selectedAgent && (
-                        <AgentWorkingCard
-                          agent={message.selectedAgent}
-                          status={
-                            loading && index === messages.length - 1
-                              ? workforceStatus?.status || "drafting"
-                              : "ready"
-                          }
-                          label={
-                            loading && index === messages.length - 1
-                              ? workforceStatus?.label || "Working..."
-                              : "Ready"
-                          }
-                          sourceCount={message.sources?.length}
-                          onViewWork={() =>
-                            openWorkforceDrawer(
-                              message.selectedAgent!,
-                              loading && index === messages.length - 1
-                                ? workforceStatus
-                                : {
-                                    agent: message.selectedAgent!,
-                                    status: "ready",
-                                    label: "Ready",
-                                    sourceCount: message.sources?.length,
-                                  }
-                            )
-                          }
-                        />
                       )}
 
                       {message.role === "assistant" && message.workflow && (
@@ -1603,7 +1156,7 @@ export default function Home() {
                         )}
 
                       {message.role === "assistant" &&
-                        getStrongSources(message.sources).length > 0 && (
+                        getVisibleSources(message.sources).length > 0 && (
                           <div className="mt-6 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
@@ -1611,17 +1164,20 @@ export default function Home() {
                               </p>
 
                               <span className="rounded-full bg-white px-2 py-1 text-[10px] font-medium text-[#64748b] ring-1 ring-[#e5e7eb]">
-                                {getStrongSources(message.sources).length} shown
+                                {getVisibleSources(message.sources).length} shown
                               </span>
                             </div>
 
                             <div className="grid gap-2">
-                              {getStrongSources(message.sources).map((source, sourceIndex) => (
+                              {getVisibleSources(message.sources).map((source, sourceIndex) => {
+                                const openUrl = getSourceOpenUrl(source);
+
+                                return (
                                 <div
                                   key={source.id}
-                                  className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs shadow-sm"
+                                  className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs shadow-sm transition hover:border-[#cbd5e1] hover:shadow-md"
                                 >
-                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0 flex-1">
                                       <div className="flex items-start gap-2">
                                         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e6f4f1] text-[10px] font-bold text-[#0f766e]">
@@ -1643,17 +1199,19 @@ export default function Home() {
                                     </div>
 
                                     <div className="flex shrink-0 items-center gap-2 sm:justify-end">
-                                      <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[10px] font-medium text-[#64748b]">
+                                      {Number(source.similarity || 0) > 0 && (
+                                        <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[10px] font-medium text-[#64748b]">
                                         Match{" "}
                                         {Math.round(
                                           Number(source.similarity || 0) * 100
                                         )}
                                         %
-                                      </span>
+                                        </span>
+                                      )}
 
-                                      {source.sourceUrl && (
+                                      {openUrl && (
                                         <a
-                                          href={source.sourceUrl}
+                                          href={openUrl}
                                           target="_blank"
                                           rel="noreferrer"
                                           className="inline-flex rounded-full bg-[#0f766e] px-3 py-1 text-[10px] font-semibold text-white transition hover:bg-[#115e59]"
@@ -1661,16 +1219,18 @@ export default function Home() {
                                           Open
                                         </a>
                                       )}
+                                      {!openUrl && (
+                                        <span className="inline-flex rounded-full bg-[#f1f5f9] px-3 py-1 text-[10px] font-semibold text-[#94a3b8]">
+                                          No link
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {source.sourceUrl && (
-                                    <p className="mt-2 truncate pl-7 text-[10px] text-[#94a3b8]">
-                                      {source.sourceUrl}
-                                    </p>
-                                  )}
+
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -1792,23 +1352,6 @@ export default function Home() {
           </div>
         </section>
 
-        {!workforceDrawerOpen && (
-          <FloatingWorkforceButton
-            agent={activeWorkforceAgent}
-            status={activeWorkforceStatus}
-            onClick={() => {
-              if (activeWorkforceAgent) {
-                openWorkforceDrawer(activeWorkforceAgent, workforceStatus);
-              }
-            }}
-          />
-        )}
-        <WorkforceDrawer
-          open={workforceDrawerOpen}
-          onClose={closeWorkforceDrawer}
-          agent={drawerAgent || activeWorkforceAgent}
-          statusEvent={drawerStatusEvent}
-        />
       </div>
     </main>
   );

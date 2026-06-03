@@ -149,7 +149,7 @@ export default function AuditLogPage() {
                             <p className="mb-1 text-[11px] font-semibold uppercase text-[#9ca3af]">Full Answer</p>
                             <p className="whitespace-pre-wrap text-sm text-[#6b7280]">{log.answer ?? "—"}</p>
                           </div>
-                          {log.retrieved_sources && (
+                          {Boolean(log.retrieved_sources) && (
                             <div>
                               <p className="mb-1 text-[11px] font-semibold uppercase text-[#9ca3af]">Sources / Metadata</p>
                               <pre className="overflow-x-auto rounded-lg bg-[#1e293b] p-3 text-[11px] text-[#94a3b8]">

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
+import { verifyAdminSessionToken } from "@/lib/adminSession";
 
 const COOKIE_NAME = "smhdc_session";
+const ADMIN_COOKIE_NAME = "stmarys_admin_session";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -14,8 +16,26 @@ const PUBLIC_PATHS = [
   "/branding",
 ];
 
+const ADMIN_PUBLIC_PATHS = [
+  "/admin/login",
+  "/api/admin/login",
+];
+
+const ADMIN_PATHS = [
+  "/admin",
+  "/api/admin",
+  "/api/feedback/list",
+];
+
 function isPublic(pathname: string) {
-  return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  return (
+    PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
+    ADMIN_PUBLIC_PATHS.some((p) => pathname.startsWith(p))
+  );
+}
+
+function isAdminPath(pathname: string) {
+  return ADMIN_PATHS.some((p) => pathname.startsWith(p));
 }
 
 function hasInternalSecret(req: NextRequest): boolean {
@@ -29,6 +49,16 @@ function hasInternalSecret(req: NextRequest): boolean {
   );
 }
 
+async function hasAdminSession(req: NextRequest): Promise<boolean> {
+  const secret = process.env.INTERNAL_ADMIN_SECRET;
+  if (!secret) return false;
+
+  const token = req.cookies.get(ADMIN_COOKIE_NAME)?.value;
+  if (!token) return false;
+
+  return verifyAdminSessionToken(token, secret);
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -36,6 +66,24 @@ export async function proxy(req: NextRequest) {
 
   // Allow MCP server and service-to-service calls
   if (hasInternalSecret(req)) return NextResponse.next();
+
+  if (isAdminPath(pathname)) {
+    if (await hasAdminSession(req)) return NextResponse.next();
+
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Admin access required.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const loginUrl = new URL("/admin/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
 
   const token = req.cookies.get(COOKIE_NAME)?.value;
 

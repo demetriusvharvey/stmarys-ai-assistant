@@ -33,7 +33,7 @@ const UNSAFE_CLINICAL_KEYWORDS = [
 ];
 
 const REFUSAL =
-  "I can provide general health education, but I cannot provide resident-specific medical advice, diagnosis, medication guidance, or treatment decisions. Please contact the nurse, clinical leadership, provider, or emergency services if urgent.";
+  "## Medical Education Safety\n\nI can provide general health education, but I cannot provide resident-specific medical advice, diagnosis, medication guidance, or treatment decisions.\n\nPlease contact the nurse, clinical leadership, provider, or emergency services if urgent.";
 
 function findMatches(question: string, keywords: string[]) {
   return keywords.filter((keyword) => question.includes(keyword));
@@ -100,9 +100,13 @@ export class MedicalEducationAgent implements Agent {
           "",
           "Educational information only — not medical advice.",
           "",
-          "This is a general health education question. Approved medical source retrieval is not connected yet, so I cannot provide a source-cited medical education answer in this foundation version.",
+          "Approved medical source retrieval is not connected yet, so I cannot provide a source-cited medical education answer in this foundation version.",
           "",
-          "For resident-specific concerns, symptoms, medication questions, diagnosis, or treatment decisions, contact the nurse, clinical leadership, provider, or emergency services if urgent.",
+          "## Safety Guidance",
+          "",
+          "- For resident-specific concerns, contact the nurse or clinical leadership.",
+          "- For symptoms, medication questions, diagnosis, or treatment decisions, contact the provider.",
+          "- For urgent symptoms or emergencies, contact emergency services.",
         ].join("\n");
 
     return {

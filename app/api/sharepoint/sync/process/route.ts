@@ -332,7 +332,6 @@ export async function POST(req: Request) {
         }
 
         const category = guessCategory(item.item_name, item.site_name);
-        const safeTitle = sanitizeFilenameForLogs(item.item_name);
 
         const documentResult = await db.query(
           `
@@ -355,7 +354,7 @@ export async function POST(req: Request) {
           returning id
           `,
           [
-            safeTitle,
+            item.item_name,
             "sharepoint",
             item.web_url || null,
             category,
@@ -390,6 +389,23 @@ export async function POST(req: Request) {
             `,
             [documentId, chunk, vectorToSql(embedding), i]
           );
+        }
+
+        const storedChunksResult = await db.query(
+          `
+          select count(*)::int as chunk_count
+          from document_chunks
+          where document_id = $1
+          `,
+          [documentId]
+        );
+
+        const storedChunkCount = Number(
+          storedChunksResult.rows[0]?.chunk_count || 0
+        );
+
+        if (storedChunkCount === 0) {
+          throw new Error("Document processed but no searchable chunks were stored");
         }
 
         await db.query(

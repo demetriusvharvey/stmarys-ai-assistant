@@ -60,6 +60,123 @@ function getAnswerLabel({
   return "General Knowledge";
 }
 
+type TitleMatchRow = {
+  id: string;
+  title: string;
+  category: string;
+  source: string;
+  source_url: string | null;
+  external_id: string | null;
+  chunks: number;
+};
+
+function getTitleSearchTerms(question: string) {
+  const stopWords = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "do",
+    "does",
+    "for",
+    "have",
+    "is",
+    "it",
+    "of",
+    "our",
+    "policy",
+    "the",
+    "to",
+    "we",
+    "what",
+    "where",
+  ]);
+
+  return question
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 4 && !stopWords.has(term))
+    .slice(0, 5);
+}
+
+function hasRetrievedTitleMatch(
+  question: string,
+  matches: { title: string }[]
+) {
+  const terms = getTitleSearchTerms(question);
+
+  if (terms.length === 0) return false;
+
+  return matches.some((match) => {
+    const title = match.title.toLowerCase();
+
+    return terms.some((term) => title.includes(term));
+  });
+}
+
+async function findActiveTitleMatches(question: string) {
+  const terms = getTitleSearchTerms(question);
+
+  if (terms.length === 0) return [] as TitleMatchRow[];
+
+  const result = await db.query(
+    `
+    select
+      d.id,
+      d.title,
+      d.category,
+      d.source,
+      d.source_url,
+      d.external_id,
+      count(dc.id)::int as chunks
+    from documents d
+    left join document_chunks dc
+      on dc.document_id = d.id
+    where
+      d.is_active = true
+      and (${terms.map((_, index) => `d.title ilike $${index + 1}`).join(" or ")})
+    group by d.id
+    order by
+      count(dc.id) desc,
+      d.created_at desc
+    limit 5
+    `,
+    terms.map((term) => `%${term}%`)
+  );
+
+  return result.rows as TitleMatchRow[];
+}
+
+function buildUnreadableDocumentAnswer(documents: TitleMatchRow[]) {
+  const listedDocuments = documents
+    .map((document, index) => {
+      const sourceLabel = [document.category, document.source]
+        .filter(Boolean)
+        .join(" · ");
+
+      return `- **${document.title}**${sourceLabel ? `\n  ${sourceLabel}` : ""}`;
+    })
+    .join("\n");
+
+  return `## Internal Source Summary
+
+I found matching St. Mary's document records, but they are not fully readable by the AI yet.
+
+These records exist in the Knowledge Library, but they do not currently have searchable text chunks. I cannot summarize or quote them until they are reindexed.
+
+Found documents:
+${listedDocuments}
+
+Next step:
+
+1. Open Sync Admin.
+2. Queue unreadable documents for reindexing.
+3. Process the sync queue.
+4. Ask again after chunks are created.`;
+}
+
 function isITTroubleshootingRequest(question: string) {
   const lowerQuestion = question.toLowerCase();
 
@@ -154,11 +271,11 @@ function getEscalationGuidance(question: string, answer: string) {
   }
 
   if (
-    combined.includes("maintenance") ||
-    combined.includes("hvac") ||
-    combined.includes("water leak") ||
-    combined.includes("plumbing") ||
-    combined.includes("electrical")
+    lowerQuestion.includes("maintenance") ||
+    lowerQuestion.includes("hvac") ||
+    lowerQuestion.includes("water leak") ||
+    lowerQuestion.includes("plumbing") ||
+    lowerQuestion.includes("electrical")
   ) {
     team = "Maintenance";
     recommendedNextStep =
@@ -563,7 +680,7 @@ export async function POST(req: NextRequest) {
             m.id,
             m.document_id,
             m.content,
-            m.source_url,
+            coalesce(m.source_url, d.source_url) as source_url,
             m.similarity,
             d.title,
             d.category,
@@ -585,10 +702,102 @@ export async function POST(req: NextRequest) {
           label: "Checking source confidence",
           sourceCount: matches.rows.length,
         });
-        const answerMode = getAnswerMode(topSimilarity);
+        let answerMode = getAnswerMode(topSimilarity);
         const trainingMode = isTrainingOrOnboardingRequest(question);
         const documentationMode = isDocumentationAssistantRequest(question);
         const itTroubleshootingMode = isITTroubleshootingRequest(question);
+
+        const titleMatches =
+          answerMode !== "internal_document_supported"
+            ? await findActiveTitleMatches(sanitizedQuestion)
+            : [];
+
+        const titleMatchesWithoutChunks = titleMatches.filter(
+          (document) => Number(document.chunks || 0) === 0
+        );
+        const titleMatchesWithChunks = titleMatches.filter(
+          (document) => Number(document.chunks || 0) > 0
+        );
+
+        if (
+          titleMatchesWithoutChunks.length > 0 &&
+          matches.rows.length === 0
+        ) {
+          const unreadableAnswer = buildUnreadableDocumentAnswer(
+            titleMatchesWithoutChunks
+          );
+          const unreadableSources = titleMatchesWithoutChunks.map((document) => ({
+            id: `document:${document.id}`,
+            documentId: document.id,
+            title: document.title,
+            category: document.category,
+            source: document.source,
+            sourceUrl: document.source_url,
+            externalId: document.external_id,
+            similarity: 1,
+            chunkIndex: null,
+          }));
+
+          streamText(controller, unreadableAnswer);
+
+          await db.query(
+            `
+            insert into audit_logs
+            (user_email, question, answer, retrieved_sources)
+            values ($1, $2, $3, $4)
+            `,
+            [
+              userEmail || null,
+              sanitizedQuestion,
+              unreadableAnswer,
+              JSON.stringify(unreadableSources),
+            ]
+          );
+
+          sendAgentStatus(controller, {
+            agent: selectedAgentMeta,
+            status: "ready",
+            label: "Document found but not indexed",
+            sourceCount: 0,
+          });
+
+          sendEvent(controller, {
+            type: "done",
+            answer: unreadableAnswer,
+            trainingMode,
+            documentationMode,
+            escalation: {
+              team: null,
+              urgency: "low",
+              recommendedNextStep: null,
+              shouldEscalate: false,
+            },
+            verification: {
+              answerMode: "possible_internal_match",
+              usedInternalDocuments: false,
+              isGeneralGuidance: false,
+              usedConversationHistory: conversationHistory.length,
+            },
+            selectedAgent: selectedAgentMeta,
+            phiWarning: phiDetected
+              ? { detected: true, redactedCount: phiRedactedCount }
+              : null,
+            sources: unreadableSources,
+          });
+
+          controller.close();
+          return;
+        }
+
+        if (
+          answerMode !== "internal_document_supported" &&
+          topSimilarity >= 0.48 &&
+          (titleMatchesWithChunks.length > 0 ||
+            hasRetrievedTitleMatch(sanitizedQuestion, matches.rows))
+        ) {
+          answerMode = "internal_document_supported";
+        }
+
         const answerLabel = getAnswerLabel({
           answerMode,
           documentationMode,
@@ -631,6 +840,32 @@ Your job:
 - If the user asks general operational/IT troubleshooting, you may use general knowledge when internal docs are missing or weak.
 - If the user's question is ambiguous and history does not clarify it, ask 1-3 smart follow-up questions.
 - Keep answers practical, step-by-step, and helpful.
+
+Formatting rules:
+- Always format your response using proper markdown:
+  - Use ## or ### for section headings.
+  - Use - or * for bullet lists. Never use plain newline-separated items for lists.
+  - Use **bold** for key terms, labels, and field names.
+  - Use numbered lists (1. 2. 3.) for sequential steps.
+  - Separate sections with a blank line.
+  - Never return a list as raw newlines without bullet syntax.
+- Make answers easy to scan. Use short paragraphs, clear section labels, and real markdown bullets.
+- Do not create long vertical laundry lists where every single record gets its own line.
+- Group related records into compact bullets. Each bullet should combine related items using commas.
+- If listing records, requirements, systems, steps, examples, or exceptions, use markdown bullets or numbered lists, but keep the list short.
+- Put a blank line before each major section.
+- For policy summaries, use this exact structure:
+  1. One short intro sentence.
+  2. Markdown heading: ### Purpose
+  3. Markdown heading: ### Retention Period
+  4. Markdown heading: ### Records Covered, followed by 3-5 grouped bullet points.
+  5. Markdown heading: ### Additional Records, followed by bullet points when applicable.
+  6. Markdown heading: ### Source Note
+- Keep each bullet focused on one idea.
+- Prefer grouped bullets like:
+  - Personnel actions: hiring, termination, promotion, transfer, layoff, leave of absence, and corrective actions.
+  - Payroll and tax records: payroll records, W-4/W-2 forms, time sheets, and wage/salary scales.
+- Do not output raw asterisks as decoration or separators.
 
 Training and onboarding behavior:
 - When the user asks operational or onboarding questions, prefer structured step-by-step responses.

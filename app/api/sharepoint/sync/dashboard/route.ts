@@ -20,6 +20,41 @@ export async function GET() {
       from document_chunks
     `);
 
+    const unreadableResult = await db.query(`
+      select
+        d.id,
+        d.title,
+        d.category,
+        d.source,
+        d.source_url,
+        d.created_at
+      from documents d
+      left join document_chunks dc
+        on dc.document_id = d.id
+      where
+        d.is_active = true
+        and d.source = 'sharepoint'
+      group by d.id
+      having count(dc.id) = 0
+      order by d.created_at desc
+      limit 25
+    `);
+
+    const unreadableCountResult = await db.query(`
+      select count(*)::int as unreadable_documents
+      from (
+        select d.id
+        from documents d
+        left join document_chunks dc
+          on dc.document_id = d.id
+        where
+          d.is_active = true
+          and d.source = 'sharepoint'
+        group by d.id
+        having count(dc.id) = 0
+      ) unreadable
+    `);
+
     const failedResult = await db.query(`
       select
         item_name,
@@ -56,6 +91,9 @@ export async function GET() {
       queue: queueResult.rows,
       documents: docsResult.rows[0],
       chunks: chunksResult.rows[0],
+      unreadableDocuments:
+        unreadableCountResult.rows[0]?.unreadable_documents || 0,
+      unreadablePreview: unreadableResult.rows,
       recentFailures: failedResult.rows,
       recentJobs: jobsResult.rows,
     });
