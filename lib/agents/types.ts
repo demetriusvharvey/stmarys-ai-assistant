@@ -6,7 +6,15 @@ export type AgentName =
   | "executive"
   | "medical_education"
   | "it_support"
-  | "document_assistant";
+  | "document_assistant"
+  | "compliance_survey"
+  | "payroll_benefits"
+  | "staffing"
+  | "training_education"
+  | "facilities"
+  | "family_communications"
+  | "quality_assurance"
+  | "vendor_supply";
 
 export type UserRole =
   | "staff"
@@ -38,7 +46,15 @@ export type AgentMode =
   | "executive"
   | "medical_education"
   | "it_support"
-  | "document_assistant";
+  | "document_assistant"
+  | "compliance_survey"
+  | "payroll_benefits"
+  | "staffing"
+  | "training_education"
+  | "facilities"
+  | "family_communications"
+  | "quality_assurance"
+  | "vendor_supply";
 
 export type AgentSource = {
   id?: string;

@@ -53,17 +53,32 @@ export class ToolRegistry {
       };
     }
 
-    const permission = evaluateToolPermission(tool, {
-      ...context,
-      observeOnly: true,
-    });
+    const permission = evaluateToolPermission(tool, context);
+
+    // Enforce permissions — deny if agent or role is not allowed
+    if (!permission.actuallyAllowed) {
+      await this.logToolDecision({
+        toolName,
+        input,
+        context,
+        permission,
+        outputSummary: `Tool denied: ${permission.reason}`,
+      });
+
+      return {
+        success: false,
+        denied: true,
+        reason: permission.reason,
+        permission,
+      };
+    }
 
     await this.logToolDecision({
       toolName,
       input,
       context,
       permission,
-      outputSummary: "Observe-only permission decision logged.",
+      outputSummary: "Permission granted — tool executing.",
     });
 
     const data = await tool.run(input, context);

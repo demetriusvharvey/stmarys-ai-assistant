@@ -164,6 +164,47 @@ function normalizeAssistantMarkdown(content: string) {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+
+function extractEmailDraft(body: string): { subject: string; emailBody: string } | null {
+  // Look for Subject: line anywhere in the draft
+  const subjectMatch = body.match(/\*{0,2}Subject\*{0,2}:\s*(.+)/i);
+  if (!subjectMatch) return null;
+
+  const subject = subjectMatch[1].trim().replace(/\*+/g, "");
+
+  // Body is everything after the first blank line following Subject:
+  const subjectIndex = body.indexOf(subjectMatch[0]);
+  const afterSubject = body.slice(subjectIndex + subjectMatch[0].length);
+
+  // Strip markdown syntax for the mailto body
+  const emailBody = afterSubject
+    .replace(/^\n+/, "")
+    .replace(/#{1,3}\s*/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/^-\s+/gm, "• ")
+    .trim();
+
+  return { subject, emailBody };
+}
+
+function OutlookButton({ body }: { body: string }) {
+  const draft = extractEmailDraft(body);
+  if (!draft) return null;
+
+  const mailto = `mailto:?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.emailBody)}`;
+
+  return (
+    <a
+      href={mailto}
+      className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-semibold text-[#0f172a] shadow-sm transition hover:border-[#0f766e] hover:text-[#0f766e]"
+    >
+      <span>📧</span>
+      Open in Outlook
+    </a>
+  );
+}
+
 const LABEL_STYLES: Record<AnswerLabel, string> = {
   "General Knowledge": "bg-[#f1f5f9] text-[#64748b]",
   "Internal Source Summary": "bg-[#ecfdf5] text-[#065f46]",
@@ -971,6 +1012,9 @@ export default function Home() {
                                 : message.content}
                             </ReactMarkdown>
                           </div>
+                          {msgLabel === "Generated Draft" && (
+                            <OutlookButton body={msgBody} />
+                          )}
                         </div>
                       )}
 
