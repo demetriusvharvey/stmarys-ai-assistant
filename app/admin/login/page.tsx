@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function AdminLoginPage() {
-  const router = useRouter();
+function AdminLoginForm() {
+  const searchParams = useSearchParams();
 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,9 +23,7 @@ export default function AdminLoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          password,
-        }),
+        body: JSON.stringify({ password }),
       });
 
       const data = await res.json();
@@ -33,8 +32,9 @@ export default function AdminLoginPage() {
         throw new Error(data.error || "Login failed");
       }
 
-      router.push("/admin/sync");
-      router.refresh();
+      // Respect callbackUrl — default to Command Center
+      const callbackUrl = searchParams.get("callbackUrl") || "/admin/agents";
+      window.location.href = callbackUrl;
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {
@@ -45,17 +45,9 @@ export default function AdminLoginPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
       <section className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 shadow-2xl p-8">
-        <p className="text-sm text-white/50 mb-2">
-          St. Mary&apos;s Home AI Assistant
-        </p>
-
-        <h1 className="text-3xl font-semibold mb-2">
-          Admin Login
-        </h1>
-
-        <p className="text-white/60 mb-8">
-          Sign in to access internal admin tools.
-        </p>
+        <p className="text-sm text-white/50 mb-2">St. Mary&apos;s Home AI Assistant</p>
+        <h1 className="text-3xl font-semibold mb-2">Admin Login</h1>
+        <p className="text-white/60 mb-8">Sign in to access internal admin tools.</p>
 
         <form onSubmit={handleLogin} className="space-y-4">
           <input
@@ -82,5 +74,13 @@ export default function AdminLoginPage() {
         </form>
       </section>
     </main>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense>
+      <AdminLoginForm />
+    </Suspense>
   );
 }

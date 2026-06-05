@@ -93,6 +93,7 @@ const IT_KEYWORDS = [
 
 const DOCUMENT_KEYWORDS = [
   "draft", "write", "write an email", "professional email",
+  "send email", "send an email", "email all", "email to",
   "executive summary", "leadership summary",
   "summarize for leadership", "summarize for the ceo",
   "summarize for the cfo", "create an sop", "make an sop",

@@ -92,3 +92,19 @@ export async function verifyAdminSessionToken(token: string, secret: string) {
     return false;
   }
 }
+
+export async function getAdminSession(): Promise<{ email: string } | null> {
+  try {
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const token = cookieStore.get("stmarys_admin_session")?.value;
+    if (!token) return null;
+    const secret = process.env.INTERNAL_ADMIN_SECRET;
+    if (!secret) return null;
+    const valid = await verifyAdminSessionToken(token, secret);
+    if (!valid) return null;
+    return { email: "admin" };
+  } catch {
+    return null;
+  }
+}

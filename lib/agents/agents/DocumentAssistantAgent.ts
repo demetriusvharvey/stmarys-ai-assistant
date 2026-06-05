@@ -14,6 +14,10 @@ const DOCUMENT_KEYWORDS = [
   "checklist",
   "template",
   "email",
+  "send email",
+  "send an email",
+  "email all",
+  "email to",
   "incident report",
   "document this",
 ];

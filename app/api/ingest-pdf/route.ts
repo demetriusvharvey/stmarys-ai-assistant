@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { openai } from "@/lib/openai";
 import { chunkText } from "@/lib/chunkText";
 import { getGraphAccessToken } from "@/lib/microsoftGraph";
+import { getSession } from "@/lib/session";
 
 const BATCH_SIZE = 5;
 
@@ -201,6 +202,10 @@ async function createEmbedding(text: string) {
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const startedAt = Date.now();
 
   try {

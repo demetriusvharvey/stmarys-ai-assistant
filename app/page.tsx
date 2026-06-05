@@ -44,6 +44,8 @@ type Message = {
   selectedAgent?: SelectedAgent;
   workflow?: WorkflowMetadata;
   phiWarning?: { detected: boolean; redactedCount: number };
+  isSchedule?: boolean;
+  scheduleMode?: "daily" | "weekly" | "report";
 };
 
 type Conversation = {
@@ -55,12 +57,6 @@ type Conversation = {
 
 const LOGO_URL =
   "https://saintmaryshome.org/wp-content/uploads/2025/05/SMH-Logo-2025_LinearStackedTagline-Color.svg";
-
-const STARTER_MESSAGE: Message = {
-  role: "assistant",
-  content:
-    "Hi, I’m St. Mary’s AI Workforce. I orchestrate specialized AI agents to help staff search approved knowledge, troubleshoot operational issues, draft documents, and support teams.",
-};
 
 function urgencyClass(urgency: Escalation["urgency"]) {
   if (urgency === "high") {
@@ -78,6 +74,104 @@ function urgencyLabel(urgency: Escalation["urgency"]) {
   if (urgency === "high") return "High urgency";
   if (urgency === "medium") return "Medium urgency";
   return "Low urgency";
+}
+
+function getEscalationContact(escalation?: Escalation) {
+  const team = escalation?.team?.toLowerCase() || "";
+
+  if (
+    team.includes("it") ||
+    team.includes("technology") ||
+    team.includes("support") ||
+    team.includes("outlook") ||
+    team.includes("printer")
+  ) {
+    return {
+      label: "IT Support",
+      email: "infotechsupport@smhdc.org",
+    };
+  }
+
+  return {
+    label: escalation?.team || "Supervisor / Leadership",
+    email: "",
+  };
+}
+
+function buildEscalationDraft(message: Message, previousUserPrompt?: string) {
+  if (!message.escalation?.shouldEscalate) return null;
+
+  const contact = getEscalationContact(message.escalation);
+  const team = message.escalation.team || "Supervisor / Leadership";
+  const urgency = urgencyLabel(message.escalation.urgency);
+  const requestSummary = previousUserPrompt || "No original request was captured.";
+    const subject = `${team} prompt: review recommended next step`;
+  const body = [
+    `Hello ${contact.label},`,
+    "",
+    "Could you please review the prompt below and advise on the appropriate next step?",
+    "",
+    `Prompt: ${requestSummary}`,
+    "",
+    "Details:",
+    `• Recommended team: ${team}`,
+    `• Urgency: ${urgency}`,
+    message.escalation.recommendedNextStep
+      ? `• Suggested next step: ${message.escalation.recommendedNextStep}`
+      : null,
+    "",
+    "Please let me know how you would like this handled.",
+  ].filter((line): line is string => line !== null).join("\n");
+    const teamsBody = [
+      `Can someone from ${team} review this prompt?`,
+      "",
+      "Prompt",
+      requestSummary,
+    "",
+    `Urgency: ${urgency}`,
+    message.escalation.recommendedNextStep
+      ? `Suggested next step: ${message.escalation.recommendedNextStep}`
+      : null,
+  ].filter((line): line is string => line !== null).join("\n");
+
+  return {
+    contact,
+    subject,
+    body,
+    teamsBody,
+    mailto: `mailto:${encodeURIComponent(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeMailtoBody(body)}`,
+    teamKey: contact.email === "infotechsupport@smhdc.org" ? "it_support" : "",
+  };
+}
+
+async function openTeamsEscalationDraft(draft: NonNullable<ReturnType<typeof buildEscalationDraft>>) {
+  let recipients: string[] = [];
+
+  if (draft.teamKey) {
+    const res = await fetch(
+      `/api/escalation/teams-recipients?team=${encodeURIComponent(draft.teamKey)}`
+    );
+    const data = (await res.json().catch(() => null)) as
+      | { recipients?: unknown }
+      | null;
+
+    if (Array.isArray(data?.recipients)) {
+      recipients = data.recipients.filter(
+        (recipient): recipient is string =>
+          typeof recipient === "string" && recipient.includes("@")
+      );
+    }
+  }
+
+  if (recipients.length === 0 && draft.contact.email.includes("@")) {
+    recipients = [draft.contact.email];
+  }
+
+  if (recipients.length === 0) return;
+
+  const encodedUsers = recipients.map((recipient) => encodeURIComponent(recipient)).join(",");
+  const teamsUrl = `msteams://teams.microsoft.com/l/chat/0/0?users=${encodedUsers}&topicName=${encodeURIComponent("AI Workforce Escalation")}&message=${encodeURIComponent(draft.teamsBody)}`;
+  window.open(teamsUrl, "_blank", "noopener,noreferrer");
 }
 
 
@@ -98,8 +192,13 @@ function getVisibleSources(sources?: Source[]) {
     }
   }
 
-  return [...uniqueSources.values()]
+  const rankedSources = [...uniqueSources.values()]
     .sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
+  const strongSources = rankedSources.filter(
+    (source) => Number(source.similarity || 0) >= 0.4
+  );
+
+  return (strongSources.length > 0 ? strongSources : rankedSources).slice(0, 8);
 }
 
 function getSourceOpenUrl(source: Source) {
@@ -165,16 +264,46 @@ function normalizeAssistantMarkdown(content: string) {
 }
 
 
-function extractEmailDraft(body: string): { subject: string; emailBody: string } | null {
+function cleanEmailDraftLine(value: string) {
+  return value
+    .replace(/\*+/g, "")
+    .replace(/\[optional\]/gi, "")
+    .replace(/\bnone\b/gi, "")
+    .trim();
+}
+
+function extractEmailAddresses(value: string) {
+  const cleaned = cleanEmailDraftLine(value);
+  const matches = cleaned.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  return matches || [];
+}
+
+function getEmailField(body: string, field: "To" | "CC" | "BCC" | "Subject") {
+  const match = body.match(new RegExp(`^\\s*[-*]?\\s*\\*{0,2}${field}\\*{0,2}:\\s*(.+)$`, "im"));
+  return match ? cleanEmailDraftLine(match[1]) : "";
+}
+
+function extractEmailDraft(body: string): {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  emailBody: string;
+} | null {
   // Look for Subject: line anywhere in the draft
-  const subjectMatch = body.match(/\*{0,2}Subject\*{0,2}:\s*(.+)/i);
+  const subjectMatch = body.match(/^\s*[-*]?\s*\*{0,2}Subject\*{0,2}:\s*(.+)$/im);
   if (!subjectMatch) return null;
 
-  const subject = subjectMatch[1].trim().replace(/\*+/g, "");
+  const subject = cleanEmailDraftLine(subjectMatch[1]);
+  const to = extractEmailAddresses(getEmailField(body, "To"));
+  const cc = extractEmailAddresses(getEmailField(body, "CC"));
+  const bcc = extractEmailAddresses(getEmailField(body, "BCC"));
 
-  // Body is everything after the first blank line following Subject:
-  const subjectIndex = body.indexOf(subjectMatch[0]);
-  const afterSubject = body.slice(subjectIndex + subjectMatch[0].length);
+  const bodyMatch = body.match(/^\s*[-*]?\s*\*{0,2}Body\*{0,2}:\s*$/im);
+  const bodyStart = bodyMatch
+    ? body.indexOf(bodyMatch[0]) + bodyMatch[0].length
+    : body.indexOf(subjectMatch[0]) + subjectMatch[0].length;
+  const afterSubject = body.slice(bodyStart);
 
   // Strip markdown syntax for the mailto body
   const emailBody = afterSubject
@@ -185,14 +314,25 @@ function extractEmailDraft(body: string): { subject: string; emailBody: string }
     .replace(/^-\s+/gm, "• ")
     .trim();
 
-  return { subject, emailBody };
+  return { to, cc, bcc, subject, emailBody };
+}
+
+function encodeMailtoBody(value: string) {
+  return encodeURIComponent(value.replace(/\r?\n/g, "\r\n"));
 }
 
 function OutlookButton({ body }: { body: string }) {
   const draft = extractEmailDraft(body);
   if (!draft) return null;
 
-  const mailto = `mailto:?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.emailBody)}`;
+  const params = [
+    draft.cc.length > 0 ? `cc=${encodeURIComponent(draft.cc.join(","))}` : null,
+    draft.bcc.length > 0 ? `bcc=${encodeURIComponent(draft.bcc.join(","))}` : null,
+    `subject=${encodeURIComponent(draft.subject)}`,
+    `body=${encodeMailtoBody(draft.emailBody)}`,
+  ].filter(Boolean);
+
+  const mailto = `mailto:${encodeURIComponent(draft.to.join(","))}?${params.join("&")}`;
 
   return (
     <a
@@ -200,7 +340,7 @@ function OutlookButton({ body }: { body: string }) {
       className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-semibold text-[#0f172a] shadow-sm transition hover:border-[#0f766e] hover:text-[#0f766e]"
     >
       <span>📧</span>
-      Open in Outlook
+      Send email (draft)
     </a>
   );
 }
@@ -213,7 +353,7 @@ const LABEL_STYLES: Record<AnswerLabel, string> = {
 };
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([STARTER_MESSAGE]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null
@@ -225,6 +365,8 @@ export default function Home() {
 
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -276,6 +418,38 @@ export default function Home() {
         }
       }
     }
+  }
+
+  function toggleVoice() {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Please use Chrome.");
+      return;
+    }
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const rec = new SpeechRecognition();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    recognitionRef.current = rec;
+    rec.onstart = () => setListening(true);
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results)
+        .map((r: any) => r[0].transcript)
+        .join("");
+      setQuestion(transcript);
+      if (e.results[e.results.length - 1].isFinal) {
+        setListening(false);
+      }
+    };
+    rec.start();
   }
 
   async function copyMessage(content: string, index: number) {
@@ -465,13 +639,7 @@ export default function Home() {
       const conversation = await createConversation("New Chat");
 
       setActiveConversationId(conversation.id);
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "Hi, I’m St. Mary’s AI Workforce. Which specialized agent should I route your work to today?",
-        },
-      ]);
+      setMessages([]);
       setQuestion("");
       handleImageSelect(null);
     } catch (error: any) {
@@ -505,7 +673,7 @@ export default function Home() {
         })
       );
 
-      setMessages(loadedMessages.length > 0 ? loadedMessages : [STARTER_MESSAGE]);
+      setMessages(loadedMessages);
     } catch (error: any) {
       setMessages([
         {
@@ -518,21 +686,50 @@ export default function Home() {
     }
   }
 
-  async function askQuestion() {
-    if ((!question.trim() && !selectedImage) || loading) return;
+  async function deleteConversation(conversationId: string) {
+    if (!confirm("Delete this chat?")) return;
+
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to delete chat");
+      }
+
+      setConversations((prev) =>
+        prev.filter((conversation) => conversation.id !== conversationId)
+      );
+
+      if (activeConversationId === conversationId) {
+        setActiveConversationId(null);
+        setMessages([]);
+      }
+    } catch (error: any) {
+      alert(error.message || "Failed to delete chat");
+    }
+  }
+
+  async function askQuestion(overrideQuestion?: string) {
+    const effectiveQuestion = overrideQuestion ?? question;
+    if ((!effectiveQuestion.trim() && !selectedImage) || loading) return;
+    if (overrideQuestion) setQuestion(overrideQuestion);
 
     let conversationId = activeConversationId;
 
     try {
       if (!conversationId) {
         const conversation = await createConversation(
-          question.trim() ? question.slice(0, 60) : "Image conversation"
+          effectiveQuestion.trim() ? effectiveQuestion.slice(0, 60) : "Image conversation"
         );
         conversationId = conversation.id;
         setActiveConversationId(conversation.id);
       }
 
-      const currentQuestion = question.trim();
+      const currentQuestion = (overrideQuestion ?? question).trim();
       const imageFile = selectedImage;
       const currentImagePreviewUrl = imagePreviewUrl;
 
@@ -691,6 +888,8 @@ export default function Home() {
                   selectedAgent: payload.selectedAgent,
                   workflow: payload.workflow,
                   phiWarning: payload.phiWarning || undefined,
+                  isSchedule: payload.isSchedule || false,
+                  scheduleMode: payload.scheduleMode || undefined,
                 };
               }
 
@@ -723,6 +922,127 @@ export default function Home() {
     }
   }
 
+  const isEmptyChat = messages.length === 0 && !loading;
+
+  function renderComposer(variant: "center" | "bottom") {
+    const isCenter = variant === "center";
+
+    return (
+      <div className={isCenter ? "mx-auto w-full max-w-3xl" : "mx-auto max-w-4xl"}>
+        {imagePreviewUrl && (
+          <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-white p-3 shadow-sm">
+            <div className="flex items-start gap-3">
+              <img
+                src={imagePreviewUrl}
+                alt="Selected image"
+                className="h-24 w-32 rounded-xl object-cover"
+              />
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[#222]">
+                  {selectedImage?.name}
+                </p>
+                <p className="mt-1 text-xs text-[#666]">
+                  Image ready. Add a question or press Send.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleImageSelect(null)}
+                className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs hover:bg-[#f1f1f1]"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`flex items-end gap-2 rounded-3xl border border-[#d1d5db] bg-white px-3 py-3 focus-within:border-[#94a3b8] sm:gap-3 sm:px-4 ${
+            isCenter
+              ? "shadow-2xl shadow-black/10"
+              : "shadow-lg shadow-black/5"
+          }`}
+        >
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => handleImageSelect(e.target.files?.[0] || null)}
+          />
+
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={loading}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-lg font-semibold leading-none hover:bg-[#f7f7f8] disabled:opacity-50"
+            title="Attach image"
+          >
+            +
+          </button>
+
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onPaste={handleImagePaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                askQuestion();
+              }
+            }}
+            placeholder={
+              selectedImage
+                ? "Ask about this image..."
+                : "Message St. Mary's AI Workforce..."
+            }
+            rows={1}
+            className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-sm leading-6 outline-none placeholder:text-[#9ca3af]"
+          />
+
+          <button
+            onClick={toggleVoice}
+            disabled={loading}
+            title={listening ? "Stop recording" : "Voice input"}
+            aria-label="Voice input"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition disabled:opacity-50 ${
+              listening
+                ? "animate-pulse border-red-300 bg-red-50 text-red-500"
+                : "border-[#d9d9d9] bg-white text-[#6b7280] hover:bg-[#f7f7f8]"
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+              <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-1 17.93V21H9v2h6v-2h-2v-2.07A8.001 8.001 0 0 0 20 11h-2a6 6 0 0 1-12 0H4a8.001 8.001 0 0 0 7 6.93z"/>
+            </svg>
+          </button>
+
+          <button
+            onClick={() => askQuestion()}
+            disabled={loading || (!question.trim() && !selectedImage)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0f766e] text-lg font-semibold leading-none text-white transition hover:bg-[#115e59] disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Send message"
+            title="Send"
+          >
+            ↑
+          </button>
+        </div>
+
+        <p className="mt-3 text-center text-xs text-[#888]">
+          Answers should be verified against source documents before operational use.
+        </p>
+        <p className="mt-1 text-center text-xs text-[#b0b8c4]">
+          Security concern or PHI exposure?{" "}
+          <a
+            href="mailto:infotechsupport@smhdc.org"
+            className="underline underline-offset-2 hover:text-[#6b7280]"
+          >
+            Report to IT / Compliance
+          </a>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <main className="h-screen overflow-hidden bg-[#fbfbfa] text-[#171717]">
       <div className="flex h-screen overflow-hidden">
@@ -732,14 +1052,24 @@ export default function Home() {
           }`}
         >
           <div className="flex h-14 items-center justify-between px-3">
-            {sidebarCollapsed ? (
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-xs font-semibold text-[#0f766e] shadow-sm">
-               ⌂
-              </div>
-            ) : (
-              <img src={LOGO_URL} alt="St. Mary's Home" className="h-9 w-auto" />
-            )}
-
+            <a
+              href="/"
+              className={`flex h-11 min-w-0 items-center rounded-xl font-semibold text-[#111827] transition hover:bg-white ${
+                sidebarCollapsed ? "w-11 justify-center" : "gap-2 px-2"
+              }`}
+              title="St. Mary's Home AI Workforce"
+            >
+              {sidebarCollapsed ? (
+                <img src={LOGO_URL} alt="St. Mary's Home" className="h-7 w-auto max-w-9 object-contain" />
+              ) : (
+                <>
+                  <img src={LOGO_URL} alt="St. Mary's Home" className="h-8 w-auto max-w-[120px] shrink-0 object-contain" />
+                  <span className="shrink-0 text-[13px] font-semibold leading-tight text-[#111827]">
+                    AI Workforce
+                  </span>
+                </>
+              )}
+            </a>
             <button
               type="button"
               onClick={() => setSidebarCollapsed((value) => !value)}
@@ -751,73 +1081,94 @@ export default function Home() {
             </button>
           </div>
 
-          <button
-            onClick={newChat}
-            className={`mx-2 mt-1 flex h-10 items-center rounded-xl text-sm font-medium text-[#111827] transition hover:bg-white ${
-              sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
-            }`}
-            title="New chat"
-          >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#d9d9d9] bg-white text-base leading-none">
-              +
-            </span>
-            {!sidebarCollapsed && <span>New chat</span>}
-          </button>
-
           <nav className="mt-2 space-y-0.5 px-2 text-sm">
             <button
-              className={`flex h-10 w-full items-center rounded-xl bg-[#e8ecef] font-medium text-[#111827] ${
+              onClick={newChat}
+              className={`flex h-10 w-full items-center rounded-xl font-medium text-[#111827] transition hover:bg-white ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3 text-left"
               }`}
-              title="AI Workforce"
+              title="New chat"
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
-                ◔
+                ✎
               </span>
-              {!sidebarCollapsed && <span>AI Workforce</span>}
+              {!sidebarCollapsed && <span>New chat</span>}
             </button>
 
             <a
+              href="/conversations"
+              className={`flex h-10 items-center rounded-xl font-medium text-[#111827] transition hover:bg-white ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+              }`}
+              title="Chat history"
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
+                ☰
+              </span>
+              {!sidebarCollapsed && <span>Chat history</span>}
+            </a>
+
+            <a
               href="/knowledge"
-              className={`flex h-10 items-center rounded-xl font-medium text-[#64748b] transition hover:bg-white hover:text-[#111827] ${
+              className={`flex h-10 items-center rounded-xl font-medium text-[#111827] transition hover:bg-white ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
               }`}
               title="Knowledge Library"
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
-                □
+                ▣
               </span>
               {!sidebarCollapsed && <span>Knowledge Library</span>}
             </a>
 
-            {sidebarCollapsed && (
-              <>
-                <button
-                  type="button"
-                  className="flex h-10 w-full items-center justify-center rounded-xl text-[#64748b] transition hover:bg-white hover:text-[#111827]"
-                  title="Search chats"
-                  aria-label="Search chats"
-                >
-                  ⌕
-                </button>
+            {(currentUser?.role === "admin" || currentUser?.role === "it_staff") && (
+              <a
+                href="/admin/agents"
+                className={`flex h-10 items-center rounded-xl font-medium text-[#111827] transition hover:bg-white ${
+                  sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+                }`}
+                title="Command Center"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
+                  ✦
+                </span>
+                {!sidebarCollapsed && <span>Command Center</span>}
+              </a>
+            )}
 
-                <button
-                  type="button"
+            {currentUser?.role === "admin" && (
+              <a
+                href="/admin/dashboard"
+                className={`flex h-10 items-center rounded-xl font-medium text-[#111827] transition hover:bg-white ${
+                  sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+                }`}
+                title="Admin Dashboard"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm">
+                  ⚙
+                </span>
+                {!sidebarCollapsed && <span>Admin Dashboard</span>}
+              </a>
+            )}
+
+          </nav>
+
+          <div className={`mt-6 min-h-0 flex-1 ${sidebarCollapsed ? "px-2" : "px-2"}`}>
+            {sidebarCollapsed ? (
+              <div className="space-y-0.5">
+                <a
+                  href="/conversations"
                   className="flex h-10 w-full items-center justify-center rounded-xl text-[#64748b] transition hover:bg-white hover:text-[#111827]"
                   title="Recent chats"
                   aria-label="Recent chats"
                 >
                   ☰
-                </button>
-              </>
-            )}
-          </nav>
-
-          <div className={`mt-5 min-h-0 flex-1 ${sidebarCollapsed ? "px-2" : "px-2"}`}>
-            {!sidebarCollapsed && (
+                </a>
+              </div>
+            ) : (
               <div className="mb-1 flex items-center justify-between px-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-[#9ca3af]">
-                  Recent
+                <p className="text-[13px] font-semibold text-[#111827]">
+                  Recents
                 </p>
                 {conversations.length > 0 && (
                   <button
@@ -826,7 +1177,7 @@ export default function Home() {
                       await fetch("/api/conversations/clear", { method: "DELETE" });
                       setConversations([]);
                       setActiveConversationId(null);
-                      setMessages([STARTER_MESSAGE]);
+                      setMessages([]);
                     }}
                     className="text-[10px] font-medium text-[#9ca3af] hover:text-red-500 transition"
                     title="Clear all conversations"
@@ -851,20 +1202,36 @@ export default function Home() {
               )}
 
               {!sidebarCollapsed && conversations.map((conversation) => (
-                <button
+                <div
                   key={conversation.id}
-                  onClick={() => loadConversation(conversation.id)}
-                  className={`flex h-9 w-full items-center rounded-lg text-left transition ${
+                  className={`group flex h-9 w-full items-center rounded-lg transition ${
                     activeConversationId === conversation.id
                       ? "bg-white text-[#111827] shadow-sm"
-                      : "text-[#6b7280] hover:bg-white/80 hover:text-[#111827]"
-                  } px-2.5`}
-                  title={conversation.title}
+                      : "text-[#111827] hover:bg-white/80"
+                  }`}
                 >
-                  <span className="min-w-0 truncate text-[13px] font-normal leading-5">
-                    {conversation.title || "New Chat"}
-                  </span>
-                </button>
+                  <button
+                    onClick={() => loadConversation(conversation.id)}
+                    className="min-w-0 flex-1 px-2.5 text-left"
+                    title={conversation.title}
+                  >
+                    <span className="block min-w-0 truncate text-[13px] font-normal leading-5">
+                      {conversation.title || "New Chat"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteConversation(conversation.id);
+                    }}
+                    className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#9ca3af] opacity-0 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
+                    title="Delete chat"
+                    aria-label={`Delete ${conversation.title || "chat"}`}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -872,17 +1239,26 @@ export default function Home() {
           {!sidebarCollapsed && (
             <div className="border-t border-[#ececec] px-3 py-3">
               <div className="flex items-center gap-2 rounded-xl px-2 py-2">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e6f4f1] text-xs font-semibold text-[#0f766e]">
-                  {currentUser?.name?.[0]?.toUpperCase() ?? "?"}
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0f766e] text-[11px] font-bold text-white">
+                  {currentUser?.name
+                    ? currentUser.name.trim().split(/\s+/).map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
+                    : "?"}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-[#111827]">
+                  <p className="text-[13px] font-semibold text-[#111827] leading-tight">
                     {currentUser?.name ?? "Staff"}
                   </p>
                   <p className="truncate text-[11px] text-[#9ca3af]">
-                    {currentUser?.role === "admin" ? "Admin" : currentUser?.role === "it_staff" ? "IT Staff" : "Staff"}
+                    {currentUser?.email ?? (currentUser?.role === "admin" ? "Admin" : currentUser?.role === "it_staff" ? "IT Staff" : "Staff")}
                   </p>
                 </div>
+                <a
+                  href="/settings"
+                  title="Account settings"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#9ca3af] transition hover:bg-[#f1f5f9] hover:text-[#374151]"
+                >
+                  ⚙
+                </a>
                 <button
                   onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }}
                   title="Sign out"
@@ -891,25 +1267,6 @@ export default function Home() {
                   ↪
                 </button>
               </div>
-              {(currentUser?.role === "admin" || currentUser?.role === "it_staff") && (
-                <div className="mt-1 space-y-0.5">
-                  <a
-                    href="/admin/agents"
-                    className="flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
-                  >
-                    <span>✦</span>
-                    <span>Command Center</span>
-                  </a>
-
-                  <a
-                    href="/admin/users"
-                    className="flex h-8 items-center gap-2 rounded-lg px-2 text-[12px] text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
-                  >
-                    <span>⚙</span>
-                    <span>Manage accounts</span>
-                  </a>
-                </div>
-              )}
             </div>
           )}
         </aside>
@@ -930,21 +1287,48 @@ export default function Home() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
             <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col">
-              {messages.length <= 1 && (
-                <div className="mx-auto mb-10 mt-4 w-full max-w-2xl text-center sm:mt-10">
+              {isEmptyChat && (
+                <div className="mx-auto flex min-h-[80vh] w-full max-w-3xl flex-col items-center justify-center px-4 pb-20 pt-4 text-center">
                   <img
                     src={LOGO_URL}
                     alt="St. Mary's Home"
-                    className="mx-auto mb-5 h-12 w-auto sm:h-14"
+                    className="mx-auto mb-4 h-12 w-auto sm:h-14"
                   />
 
                   <h1 className="text-2xl font-semibold tracking-tight text-[#111827] sm:text-3xl">
                     St. Mary&apos;s AI Workforce
                   </h1>
 
-                  <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-[#5f6368]">
-                    An intelligent workforce of AI agents for St. Mary&apos;s staff — search organizational knowledge, complete operational tasks, troubleshoot issues, generate documents, and assist teams using approved information sources.
-                  </p>
+                  <h2 className="mt-5 text-xl font-medium text-[#374151] sm:text-2xl">
+                    What can I help with{currentUser?.name ? `, ${currentUser.name.trim().split(/\s+/)[0]}` : ""}?
+                  </h2>
+
+                  <div className="mt-4 w-full">
+                    {renderComposer("center")}
+                  </div>
+
+                  {/* Action chips */}
+                  <div className="mt-5 flex flex-wrap justify-center gap-3">
+                    <button
+                      onClick={() => askQuestion("Create my daily schedule")}
+                      className="flex items-center gap-2 rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3 text-left shadow-sm transition hover:border-[#0f766e] hover:bg-[#f9fffe]"
+                    >
+                      <span className="text-lg">📅</span>
+                      <div>
+                        <p className="text-[13px] font-semibold text-[#111827]">Create my daily schedule</p>
+                        <p className="mt-0.5 text-[12px] text-[#9ca3af]">Calendar, emails &amp; tasks</p>
+                      </div>
+                    </button>
+
+                  </div>
+
+                  {/* Medical knowledge tip */}
+                  <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-[#d1fae5] bg-[#f0fdf4] px-4 py-3 text-left max-w-lg">
+                    <span className="mt-0.5 text-base shrink-0">⚕️</span>
+                    <p className="text-[13px] leading-relaxed text-[#166534]">
+                      <span className="font-semibold">Medical questions welcome.</span>{" "}Ask about medications, conditions, infection control, or clinical procedures — backed by FDA, NIH, MedlinePlus &amp; CDC. Don&apos;t include resident names or PHI.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -989,6 +1373,59 @@ export default function Home() {
                           <span>
                             Sensitive information was detected and removed from your message before processing. Do not enter resident, patient, or employee information into this assistant.
                           </span>
+                        </div>
+                      )}
+
+                      {message.role === "assistant" && message.isSchedule && (
+                        <div className="mb-4 flex flex-wrap items-center gap-2">
+                          <span className="text-[12px] font-medium text-[#6b7280]">
+                          {message.scheduleMode === "report" ? "Your weekly accomplishment report is ready." : `Your ${message.scheduleMode ?? "daily"} schedule is ready.`}
+                        </span>
+                          <button
+                            onClick={() => {
+                              const w = window.open("", "_blank");
+                              if (!w) return;
+                              w.document.write("<html><head><title>Schedule</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;line-height:1.7}h1,h2,h3{color:#0f766e}ul{padding-left:20px}</style></head><body>");
+                              w.document.write("<h1>📅 " + (message.scheduleMode === "weekly" ? "Weekly" : "Daily") + " Schedule</h1>");
+                              w.document.write("<pre style='white-space:pre-wrap;font-family:inherit'>" + (message.content ?? "").replace(/</g,"&lt;") + "</pre>");
+                              w.document.write("</body></html>");
+                              w.document.close();
+                              w.print();
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-[12px] font-medium text-[#374151] shadow-sm hover:border-[#0f766e] hover:text-[#0f766e]"
+                          >
+                            🖨️ Print
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (message.scheduleMode === "report") {
+                                const res = await fetch("/api/reports/weekly?email=true");
+                                const data = await res.json();
+                                if (data.success) alert("Report emailed to your Outlook inbox!");
+                                else alert("Could not send email: " + (data.error ?? "unknown error"));
+                              } else {
+                                const res = await fetch("/api/schedule/email", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ schedule: message.content, mode: message.scheduleMode }),
+                                });
+                                const data = await res.json();
+                                if (data.success) alert("Schedule emailed to your Outlook inbox!");
+                                else alert("Could not send email: " + (data.error ?? "unknown error"));
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-[12px] font-medium text-[#374151] shadow-sm hover:border-[#0f766e] hover:text-[#0f766e]"
+                          >
+                            📧 Email to me
+                          </button>
+                          {message.scheduleMode !== "weekly" && (
+                            <button
+                              onClick={() => { setQuestion("Create my weekly schedule"); askQuestion("Create my weekly schedule"); }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#d1fae5] bg-[#f0fdf4] px-3 py-1.5 text-[12px] font-medium text-[#0f766e] shadow-sm hover:bg-[#dcfce7]"
+                            >
+                              📆 Get weekly schedule
+                            </button>
+                          )}
                         </div>
                       )}
 
@@ -1169,39 +1606,8 @@ export default function Home() {
                       )}
 
                       {message.role === "assistant" &&
-                        message.escalation?.shouldEscalate && (
-                          <div className="mt-6 rounded-2xl border border-[#e5e5e5] bg-white p-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <p className="text-xs font-semibold uppercase tracking-wide text-[#666]">
-                                  Recommended Escalation
-                                </p>
-
-                                <p className="mt-1 text-sm font-semibold text-[#222]">
-                                  {message.escalation.team || "Supervisor / Leadership"}
-                                </p>
-
-                                {message.escalation.recommendedNextStep && (
-                                  <p className="mt-2 text-xs leading-5 text-[#666]">
-                                    {message.escalation.recommendedNextStep}
-                                  </p>
-                                )}
-                              </div>
-
-                              <span
-                                className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${urgencyClass(
-                                  message.escalation.urgency
-                                )}`}
-                              >
-                                {urgencyLabel(message.escalation.urgency)}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                      {message.role === "assistant" &&
                         getVisibleSources(message.sources).length > 0 && (
-                          <div className="mt-6 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
+                          <div className="mt-4 rounded-xl border border-[#e5e7eb] bg-[#f8fafc]/80 p-3">
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">
                                 Source Citations
@@ -1212,14 +1618,14 @@ export default function Home() {
                               </span>
                             </div>
 
-                            <div className="grid gap-2">
+                            <div className="grid max-h-[174px] gap-2 overflow-y-auto pr-1">
                               {getVisibleSources(message.sources).map((source, sourceIndex) => {
                                 const openUrl = getSourceOpenUrl(source);
 
                                 return (
                                 <div
                                   key={source.id}
-                                  className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-xs shadow-sm transition hover:border-[#cbd5e1] hover:shadow-md"
+                                  className="rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-xs shadow-sm transition hover:border-[#cbd5e1]"
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0 flex-1">
@@ -1278,6 +1684,77 @@ export default function Home() {
                             </div>
                           </div>
                         )}
+
+                      {message.role === "assistant" &&
+                        message.escalation?.shouldEscalate && (() => {
+                          const escalationDraft = buildEscalationDraft(
+                            message,
+                            messages[index - 1]?.role === "user"
+                              ? messages[index - 1]?.content
+                              : undefined
+                          );
+
+                          return (
+                          <div className="mt-4 rounded-xl border border-[#e5e7eb] bg-white px-3 py-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748b]">
+                                    Recommended Support Escalation
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex w-fit rounded-full border px-2 py-0.5 text-[10px] font-semibold ${urgencyClass(
+                                      message.escalation.urgency
+                                    )}`}
+                                  >
+                                    {urgencyLabel(message.escalation.urgency)}
+                                  </span>
+                                </div>
+
+                                <p className="mt-1 text-xs leading-5 text-[#334155]">
+                                  <span className="font-semibold text-[#0f172a]">
+                                    {message.escalation.team || "Supervisor / Leadership"}:
+                                  </span>{" "}
+                                  {message.escalation.recommendedNextStep ||
+                                    "Review and advise on the appropriate next step."}
+                                </p>
+
+                                <p className="mt-1 text-[10px] leading-4 text-[#94a3b8]">
+                                  Support contact actions open as drafts only. Review before sending. No PHI, resident details, or confidential employee information.
+                                </p>
+                              </div>
+
+                            {escalationDraft && (
+                              <div className="flex shrink-0 flex-wrap gap-2">
+                                <a
+                                  href={escalationDraft.mailto}
+                                  className="inline-flex rounded-full border border-[#0f766e]/20 bg-[#ecfdf5] px-3 py-2 text-xs font-semibold text-[#0f766e] transition hover:border-[#0f766e] hover:bg-[#d1fae5]"
+                                >
+                                  Send support email
+                                </a>
+
+                                {escalationDraft.contact.email ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void openTeamsEscalationDraft(escalationDraft);
+                                    }}
+                                    className="inline-flex rounded-full border border-[#2563eb]/20 bg-[#eff6ff] px-3 py-2 text-xs font-semibold text-[#1d4ed8] transition hover:border-[#2563eb] hover:bg-[#dbeafe]"
+                                  >
+                                    Send support Teams chat
+                                  </button>
+                                ) : (
+                                  <span className="inline-flex rounded-full border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#94a3b8]">
+                                    Teams recipient needed
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            </div>
+                          </div>
+                          );
+                        })()}
                     </div>
                   </div>
                   );
@@ -1299,101 +1776,11 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-[#eeeeee] bg-[#fbfbfa]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4">
-            <div className="mx-auto max-w-4xl">
-              {imagePreviewUrl && (
-                <div className="mb-3 rounded-2xl border border-[#d9d9d9] bg-white p-3 shadow-sm">
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={imagePreviewUrl}
-                      alt="Selected image"
-                      className="h-24 w-32 rounded-xl object-cover"
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-[#222]">
-                        {selectedImage?.name}
-                      </p>
-                      <p className="mt-1 text-xs text-[#666]">
-                        Image ready. Add a question or press Send.
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => handleImageSelect(null)}
-                      className="rounded-lg border border-[#d9d9d9] bg-white px-3 py-1.5 text-xs hover:bg-[#f1f1f1]"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-end gap-2 rounded-3xl border border-[#d1d5db] bg-white px-3 py-3 shadow-lg shadow-black/5 focus-within:border-[#94a3b8] sm:gap-3 sm:px-4">
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) =>
-                    handleImageSelect(e.target.files?.[0] || null)
-                  }
-                />
-
-                <button
-                  onClick={() => imageInputRef.current?.click()}
-                  disabled={loading}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-lg font-semibold leading-none hover:bg-[#f7f7f8] disabled:opacity-50"
-                  title="Attach image"
-                >
-                  +
-                </button>
-
-                <textarea
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  onPaste={handleImagePaste}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      askQuestion();
-                    }
-                  }}
-                  placeholder={
-                    selectedImage
-                      ? "Ask about this image..."
-                      : "Message St. Mary's AI Workforce..."
-                  }
-                  rows={1}
-                  className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-sm leading-6 outline-none placeholder:text-[#9ca3af]"
-                />
-
-                <button
-                  onClick={askQuestion}
-                  disabled={loading || (!question.trim() && !selectedImage)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0f766e] text-lg font-semibold leading-none text-white transition hover:bg-[#115e59] disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="Send message"
-                  title="Send"
-                >
-                  ↑
-                </button>
-              </div>
-
-              <p className="mt-2 text-center text-xs text-[#888]">
-                Answers should be verified against source documents before
-                operational use.
-              </p>
-              <p className="mt-1 text-center text-xs text-[#b0b8c4]">
-                Security concern or PHI exposure?{" "}
-                <a
-                  href="mailto:infotechsupport@smhdc.org"
-                  className="underline underline-offset-2 hover:text-[#6b7280]"
-                >
-                  Report to IT / Compliance
-                </a>
-              </p>
+          {!isEmptyChat && (
+            <div className="shrink-0 border-t border-[#eeeeee] bg-[#fbfbfa]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4">
+              {renderComposer("bottom")}
             </div>
-          </div>
+          )}
         </section>
 
       </div>

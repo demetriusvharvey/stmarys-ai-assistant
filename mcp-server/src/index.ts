@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const APP_BASE = "http://localhost:3000";
+const APP_BASE = process.env.STMARYS_APP_URL || "http://10.10.5.193:3000";
 const AI_BASE  = `${APP_BASE}/api/ai-tools`;
 const MCP_BASE = `${APP_BASE}/api/mcp`;
 const INTERNAL_ADMIN_SECRET = process.env.INTERNAL_ADMIN_SECRET;

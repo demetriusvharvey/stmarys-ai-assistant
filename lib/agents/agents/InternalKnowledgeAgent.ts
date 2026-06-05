@@ -1,52 +1,58 @@
+import { answerQuestion } from "@/lib/ai/answerQuestion";
 import type { Agent, AgentRequest, AgentResponse } from "../types";
-import { ToolRegistry } from "@/lib/tools/ToolRegistry";
 
 export class InternalKnowledgeAgent implements Agent {
   name = "internal_knowledge" as const;
+  displayName = "Knowledge Agent";
+  icon = "🔍";
   mode = "internal" as const;
-  private readonly toolRegistry = new ToolRegistry();
 
   canHandle(_request: AgentRequest) {
     return true;
   }
 
   async answer(request: AgentRequest): Promise<AgentResponse> {
-    const toolResult = await this.toolRegistry.call(
-      "searchInternalKnowledge",
-      { query: request.question },
-      {
-        userEmail: request.user?.email || request.userEmail || null,
-        userRoles: request.resolvedRoles || ["service"],
-        selectedAgent: this.name,
-        channel: request.channel || "web",
-        agentRunId: request.routeDecision
-          ? `${request.routeDecision.agent}:${request.routeDecision.reason}`
-          : null,
-        observeOnly: true,
-      }
-    );
+    const result = await answerQuestion({
+      question: request.question,
+      userEmail: request.user?.email || request.userEmail || null,
+      conversationId: request.conversationId || null,
+      conversationHistory: request.conversationHistory,
+      audit: false,
+    });
 
     return {
-      answer:
-        "## Internal Knowledge\n\nInternal Knowledge Agent is not wired yet.",
+      answer: result.answer,
       agent: this.name,
       mode: this.mode,
-      sources: [],
+      sources: result.sources.map((s) => ({
+        id: s.id,
+        documentId: s.documentId,
+        title: s.title,
+        category: s.category,
+        source: s.source,
+        sourceUrl: s.sourceUrl,
+        similarity: s.similarity,
+      })),
       safety: {
         blocked: false,
         phiDetected: false,
         residentSpecific: false,
-        urgent: false,
+        urgent: result.escalation.urgency === "high",
       },
-      toolsUsed: [
-        {
-          toolName: "searchInternalKnowledge",
-          success: toolResult.success,
-          inputSummary: "Stub internal knowledge search.",
-          outputSummary: "Observe-only stub tool call.",
-        },
-      ],
-      auditMetadata: {},
+      toolsUsed: [{
+        toolName: "answerQuestion",
+        success: true,
+        inputSummary: "General internal knowledge RAG lookup.",
+        outputSummary: result.verification.answerMode === "internal_document_supported"
+          ? "Internal source-backed answer."
+          : "General guidance — no approved internal source found.",
+      }],
+      auditMetadata: {
+        answerMode: result.verification.answerMode,
+        retrievedChunks: result.retrievedChunks,
+        displayName: this.displayName,
+        icon: this.icon,
+      },
     };
   }
 }

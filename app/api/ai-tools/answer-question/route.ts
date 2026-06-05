@@ -1,65 +1,38 @@
 import { NextResponse } from "next/server";
-import { answerQuestion } from "@/lib/ai/answerQuestion";
 import { AgentRouter } from "@/lib/agents/AgentRouter";
 import { resolveUserRoles } from "@/lib/agents/resolveUserRoles";
-import type { AgentIdentity, AgentResponse } from "@/lib/agents/types";
+import type { AgentIdentity } from "@/lib/agents/types";
 import { writeAuditLog } from "@/lib/audit";
-import { buildDocumentCreationWorkflow } from "@/lib/workflow/documentCreation";
 import { deIdentifyText } from "@/lib/phi/deidentify";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
-function getSelectedAgentMetadata(agentName: string, reason?: string) {
-  const agents: Record<string, { displayName: string; icon: string }> = {
-    internal_knowledge: {
-      displayName: "Policy Agent",
-      icon: "📋",
-    },
-    policy: {
-      displayName: "Policy Agent",
-      icon: "📋",
-    },
-    it_support: {
-      displayName: "IT Support Agent",
-      icon: "🖥",
-    },
-    document_assistant: {
-      displayName: "HR Agent",
-      icon: "👥",
-    },
-    medical_education: {
-      displayName: "Medical Education Agent",
-      icon: "🏥",
-    },
-    executive: {
-      displayName: "Executive Agent",
-      icon: "📊",
-    },
-  };
-  const agent = agents[agentName] || agents.internal_knowledge;
-
-  return {
-    name: agentName,
-    displayName: agent.displayName,
-    icon: agent.icon,
-    reason,
-  };
-}
+const AGENT_DISPLAY: Record<string, { displayName: string; icon: string }> = {
+  internal_knowledge:    { displayName: "Knowledge Agent",          icon: "🔍" },
+  policy:                { displayName: "Policy Agent",             icon: "📋" },
+  it_support:            { displayName: "IT Support Agent",         icon: "🖥" },
+  document_assistant:    { displayName: "HR Agent",                 icon: "👥" },
+  medical_education:     { displayName: "Medical Education Agent",  icon: "🏥" },
+  executive:             { displayName: "Executive Agent",          icon: "📊" },
+  compliance_survey:     { displayName: "Compliance Agent",        icon: "✅" },
+  payroll_benefits:      { displayName: "Payroll & Benefits Agent", icon: "💰" },
+  staffing:              { displayName: "Staffing Agent",           icon: "🗓" },
+  training_education:    { displayName: "Training Agent",           icon: "🎓" },
+  facilities:            { displayName: "Facilities Agent",         icon: "🔧" },
+  family_communications: { displayName: "Family Comms Agent",       icon: "💌" },
+  quality_assurance:     { displayName: "QA Agent",                 icon: "📈" },
+  vendor_supply:         { displayName: "Vendor & Supply Agent",    icon: "📦" },
+};
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const question = body.question;
-    const limit = Number(body.limit || 7);
-    const category = body.category || null;
     const identity = (body.identity || null) as AgentIdentity | null;
 
     if (!question || typeof question !== "string") {
-      return NextResponse.json(
-        { success: false, error: "question is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: "question is required" }, { status: 400 });
     }
 
     const { cleanText: sanitizedQuestion, findings: phiFindings } = deIdentifyText(question);
@@ -68,174 +41,74 @@ export async function POST(req: Request) {
 
     const resolvedRoles = resolveUserRoles(identity);
     const router = new AgentRouter();
-    const routeDecision = router.route({
+    const decision = router.route({
       question: sanitizedQuestion,
       userEmail: identity?.email || null,
       conversationId: identity?.conversationId || null,
+      channel: identity?.channel || "mcp",
     });
-    const permissionDecision = {
-      allowed: true,
-      reason: "observe_only_no_enforcement",
-    };
-    let documentAssistantResponse: AgentResponse | null = null;
 
-    try {
-      const selectedAgent = router.getAgent(routeDecision);
-
-      if (
-        selectedAgent &&
-        routeDecision.agent !== "policy" &&
-        routeDecision.agent !== "executive"
-      ) {
-        const agentResponse = await selectedAgent.answer({
-          question: sanitizedQuestion,
-          user: {
-            identity,
-            email: identity?.email || null,
-            displayName: identity?.displayName || null,
-            tenantId: identity?.tenantId || null,
-          },
-          resolvedRoles: resolvedRoles.roles,
-          channel: identity?.channel || "mcp",
-          tenantValidated: resolvedRoles.tenantValidated,
-          routeDecision,
-          userEmail: identity?.email || null,
-          conversationId: identity?.conversationId || null,
-        });
-
-        if (routeDecision.agent === "document_assistant") {
-          documentAssistantResponse = agentResponse;
-        }
-      }
-    } catch (dryRunError) {
-      console.warn("Agent observe-only dry-run failed:", dryRunError);
+    const agent = router.getAgent(decision);
+    if (!agent) {
+      return NextResponse.json({ success: false, error: "No agent available" }, { status: 500 });
     }
 
-    if (
-      routeDecision.agent === "document_assistant" &&
-      documentAssistantResponse?.answer &&
-      documentAssistantResponse.toolsUsed.some(
-        (tool) => tool.toolName === "draftDocument" && tool.success
-      )
-    ) {
-      await writeAuditLog({
-        userEmail: identity?.email || null,
-        action: "agent_router_document_assistant",
-        route: "/api/ai-tools/answer-question",
-        metadata: {
-          channel: identity?.channel || "unknown",
-          teamsUserId: identity?.teamsUserId || null,
-          aadObjectId: identity?.aadObjectId || null,
-          displayName: identity?.displayName || null,
-          tenantId: identity?.tenantId || null,
-          conversationId: identity?.conversationId || null,
-          tenantValidated: resolvedRoles.tenantValidated,
-          resolvedRoles: resolvedRoles.roles,
-          roleSource: resolvedRoles.roleSource,
-          selectedAgent: routeDecision.agent,
-          routeConfidence: routeDecision.confidence,
-          routeReason: routeDecision.reason,
-          matchedKeywords: routeDecision.matchedKeywords,
-          permissionDecision,
-          toolOrEndpoint: "draftDocument",
-          observeOnly: true,
-          answerSource: "document_assistant",
-        },
-      });
-
-      const selectedAgentMeta = getSelectedAgentMetadata(
-        routeDecision.agent,
-        routeDecision.reason
-      );
-
-      return NextResponse.json({
-        success: true,
-        question,
-        answer: documentAssistantResponse.answer,
-        retrievedChunks: 0,
-        retrieval: {
-          topSimilarity: 0,
-          hasStrongInternalMatch: false,
-          hasPossibleInternalMatch: false,
-        },
-        selectedAgent: selectedAgentMeta,
-        sources: [],
-        workflow: buildDocumentCreationWorkflow(selectedAgentMeta.displayName),
-        phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
-      });
-    }
-
-    const result = await answerQuestion({
+    const agentResponse = await agent.answer({
       question: sanitizedQuestion,
-      limit,
-      category,
-      audit: false,
+      user: {
+        identity,
+        email: identity?.email || null,
+        displayName: identity?.displayName || null,
+        tenantId: identity?.tenantId || null,
+      },
+      resolvedRoles: resolvedRoles.roles,
+      channel: identity?.channel || "mcp",
+      tenantValidated: resolvedRoles.tenantValidated,
+      routeDecision: decision,
+      userEmail: identity?.email || null,
+      conversationId: identity?.conversationId || null,
     });
-
-    const topSimilarity = Number(result.sources[0]?.similarity || 0);
-    const hasStrongInternalMatch = topSimilarity >= 0.62;
-    const hasPossibleInternalMatch = topSimilarity >= 0.48;
 
     await writeAuditLog({
       userEmail: identity?.email || null,
-      action: "agent_router_observe_only",
+      action: "agent_answer",
       route: "/api/ai-tools/answer-question",
       metadata: {
         channel: identity?.channel || "unknown",
-        teamsUserId: identity?.teamsUserId || null,
-        aadObjectId: identity?.aadObjectId || null,
-        displayName: identity?.displayName || null,
-        tenantId: identity?.tenantId || null,
-        conversationId: identity?.conversationId || null,
-        tenantValidated: resolvedRoles.tenantValidated,
+        selectedAgent: decision.agent,
+        routeConfidence: decision.confidence,
+        routeReason: decision.reason,
+        matchedKeywords: decision.matchedKeywords,
         resolvedRoles: resolvedRoles.roles,
-        roleSource: resolvedRoles.roleSource,
-        selectedAgent: routeDecision.agent,
-        routeConfidence: routeDecision.confidence,
-        routeReason: routeDecision.reason,
-        matchedKeywords: routeDecision.matchedKeywords,
-        permissionDecision,
-        toolOrEndpoint: "answer-question",
-        observeOnly: true,
+        answerMode: agentResponse.auditMetadata?.answerMode ?? "unknown",
       },
     });
+
+    const agentMeta = {
+      name: decision.agent,
+      ...(AGENT_DISPLAY[decision.agent] ?? { displayName: "Knowledge Agent", icon: "🔍" }),
+      reason: decision.reason,
+    };
 
     return NextResponse.json({
       success: true,
       question,
-      answer: result.answer,
-      retrievedChunks: result.retrievedChunks,
-      retrieval: {
-        topSimilarity,
-        hasStrongInternalMatch,
-        hasPossibleInternalMatch,
-      },
-      selectedAgent: getSelectedAgentMetadata(
-        routeDecision.agent,
-        routeDecision.reason
-      ),
-      phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
-      sources: result.sources.map((source) => ({
-        chunkId: source.id,
-        documentId: source.documentId,
-        title: source.title,
-        category: source.category,
-        source: source.source,
-        sourceUrl: source.sourceUrl,
-        externalId: source.externalId,
-        similarity: Number(source.similarity),
-        chunkIndex: source.chunkIndex,
+      answer: agentResponse.answer,
+      selectedAgent: agentMeta,
+      sources: agentResponse.sources.map((s) => ({
+        chunkId: s.id,
+        documentId: s.documentId,
+        title: s.title,
+        category: s.category,
+        source: s.source,
+        sourceUrl: s.sourceUrl,
+        similarity: Number(s.similarity ?? 0),
       })),
+      workflow: agentResponse.workflow ?? null,
+      phiWarning: phiDetected ? { detected: true, redactedCount: phiRedactedCount } : null,
     });
   } catch (error: any) {
-    console.error("AI tool answer question error:", error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || "Failed to answer question",
-      },
-      { status: 500 }
-    );
+    console.error("[answer-question] Error:", error);
+    return NextResponse.json({ success: false, error: error.message || "Failed" }, { status: 500 });
   }
 }

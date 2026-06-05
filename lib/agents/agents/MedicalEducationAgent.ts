@@ -1,79 +1,24 @@
+import { answerQuestion } from "@/lib/ai/answerQuestion";
+import { getMedicalContext } from "@/lib/integrations/medical";
 import type { Agent, AgentRequest, AgentResponse } from "../types";
 
-const SAFE_MEDICAL_EDUCATION_KEYWORDS = [
-  "what is dehydration",
-  "dehydration",
-  "symptoms of flu",
-  "flu",
-  "influenza",
-  "c diff",
-  "c. diff",
-  "hypertension",
-  "fall prevention",
-  "hand hygiene",
-  "infection control",
-  "health education",
-  "medical education",
-];
-
 const UNSAFE_CLINICAL_KEYWORDS = [
-  "resident in room",
-  "resident",
-  "patient",
-  "medication dose",
-  "dose",
-  "diagnose",
-  "diagnosis",
-  "wound photo",
-  "chest pain",
-  "trouble breathing",
-  "shortness of breath",
-  "unresponsive",
-  "seizure",
+  "resident in room", "this resident", "my resident", "my patient",
+  "diagnose", "diagnosis", "wound photo",
+  "chest pain", "trouble breathing", "shortness of breath",
+  "unresponsive", "seizure", "not breathing",
 ];
 
 const REFUSAL =
-  "## Medical Education Safety\n\nI can provide general health education, but I cannot provide resident-specific medical advice, diagnosis, medication guidance, or treatment decisions.\n\nPlease contact the nurse, clinical leadership, provider, or emergency services if urgent.";
+  "## Medical Safety\n\nI can provide general health education, but I cannot provide resident-specific medical advice, diagnosis, or treatment decisions.\n\nIf this is urgent, contact the charge nurse or call 911.";
 
-function findMatches(question: string, keywords: string[]) {
-  return keywords.filter((keyword) => question.includes(keyword));
-}
-
-function classifyMedicalEducationRequest(question: string) {
-  const normalizedQuestion = question.toLowerCase();
-  const unsafeMatches = findMatches(
-    normalizedQuestion,
-    UNSAFE_CLINICAL_KEYWORDS
-  );
-
-  if (unsafeMatches.length > 0) {
-    return {
-      blocked: true,
-      reason: "resident_specific_or_clinical_unsafe",
-      matchedKeywords: unsafeMatches,
-      residentSpecific:
-        normalizedQuestion.includes("resident") ||
-        normalizedQuestion.includes("patient") ||
-        normalizedQuestion.includes("room"),
-      urgent:
-        normalizedQuestion.includes("chest pain") ||
-        normalizedQuestion.includes("trouble breathing") ||
-        normalizedQuestion.includes("shortness of breath") ||
-        normalizedQuestion.includes("unresponsive") ||
-        normalizedQuestion.includes("seizure"),
-    };
-  }
-
-  return {
-    blocked: false,
-    reason: "general_health_education",
-    matchedKeywords: findMatches(
-      normalizedQuestion,
-      SAFE_MEDICAL_EDUCATION_KEYWORDS
-    ),
-    residentSpecific: false,
-    urgent: false,
-  };
+function isUnsafe(question: string): { blocked: boolean; urgent: boolean; residentSpecific: boolean } {
+  const q = question.toLowerCase();
+  const matched = UNSAFE_CLINICAL_KEYWORDS.filter(k => q.includes(k));
+  const urgent = ["chest pain", "trouble breathing", "shortness of breath", "unresponsive", "seizure", "not breathing"]
+    .some(k => q.includes(k));
+  const residentSpecific = ["resident", "patient", "room"].some(k => q.includes(k)) && matched.length > 0;
+  return { blocked: matched.length > 0, urgent, residentSpecific };
 }
 
 export class MedicalEducationAgent implements Agent {
@@ -82,52 +27,101 @@ export class MedicalEducationAgent implements Agent {
   icon = "🏥";
   mode = "medical_education" as const;
 
-  canHandle(request: AgentRequest) {
-    const question = request.question.toLowerCase();
-
-    return (
-      findMatches(question, SAFE_MEDICAL_EDUCATION_KEYWORDS).length > 0 ||
-      findMatches(question, UNSAFE_CLINICAL_KEYWORDS).length > 0
-    );
+  canHandle(_request: AgentRequest) {
+    return false;
   }
 
   async answer(request: AgentRequest): Promise<AgentResponse> {
-    const classification = classifyMedicalEducationRequest(request.question);
-    const answer = classification.blocked
-      ? REFUSAL
-      : [
-          "## General Health Education",
-          "",
-          "Educational information only — not medical advice.",
-          "",
-          "Approved medical source retrieval is not connected yet, so I cannot provide a source-cited medical education answer in this foundation version.",
-          "",
-          "## Safety Guidance",
-          "",
-          "- For resident-specific concerns, contact the nurse or clinical leadership.",
-          "- For symptoms, medication questions, diagnosis, or treatment decisions, contact the provider.",
-          "- For urgent symptoms or emergencies, contact emergency services.",
-        ].join("\n");
+    const safety = isUnsafe(request.question);
+    const toolsUsed: AgentResponse["toolsUsed"] = [];
+
+    if (safety.blocked) {
+      return {
+        answer: REFUSAL,
+        agent: this.name,
+        mode: this.mode,
+        sources: [],
+        safety: { blocked: true, phiDetected: safety.residentSpecific, residentSpecific: safety.residentSpecific, urgent: safety.urgent },
+        toolsUsed: [],
+        auditMetadata: { displayName: this.displayName, icon: this.icon },
+      };
+    }
+
+    // 1. Try live medical APIs (OpenFDA, MedlinePlus, RxNorm)
+    let liveContext = "";
+    const liveSources: string[] = [];
+
+    try {
+      const medical = await getMedicalContext(request.question);
+      if (medical) {
+        liveContext = `\n\n---\n### 🔬 Live Medical Reference (${medical.type === "drug" ? "FDA / RxNorm" : "MedlinePlus / NIH"})\n\n${medical.content}`;
+        liveSources.push(...medical.sources);
+        toolsUsed.push({
+          toolName: medical.type === "drug" ? "openFDA + RxNorm" : "MedlinePlus",
+          success: true,
+          inputSummary: request.question.slice(0, 100),
+          outputSummary: `Live ${medical.type} data retrieved.`,
+        });
+      }
+    } catch (err: any) {
+      toolsUsed.push({
+        toolName: "medicalAPI",
+        success: false,
+        inputSummary: request.question.slice(0, 100),
+        outputSummary: err.message,
+      });
+    }
+
+    // 2. Internal knowledge base (our seeded documents)
+    const result = await answerQuestion({
+      question: request.question,
+      userEmail: request.user?.email || request.userEmail || null,
+      conversationId: request.conversationId || null,
+      conversationHistory: request.conversationHistory,
+      audit: false,
+    });
+
+    toolsUsed.push({
+      toolName: "answerQuestion",
+      success: true,
+      inputSummary: "Medical education knowledge lookup.",
+      outputSummary: result.verification.answerMode,
+    });
+
+    const disclaimer = "\n\n> ⚕️ **This is general health education, not medical advice.** For resident-specific concerns, contact nursing or clinical leadership.";
+    const answer = result.answer + liveContext + disclaimer;
 
     return {
       answer,
       agent: this.name,
       mode: this.mode,
-      sources: [],
-      safety: {
-        blocked: classification.blocked,
-        reason: classification.reason,
-        phiDetected: classification.residentSpecific,
-        residentSpecific: classification.residentSpecific,
-        urgent: classification.urgent,
-      },
-      toolsUsed: [],
+      sources: [
+        ...result.sources.map(s => ({
+          id: s.id,
+          documentId: s.documentId,
+          title: s.title,
+          category: s.category,
+          source: s.source,
+          sourceUrl: s.sourceUrl,
+          similarity: s.similarity,
+        })),
+        ...liveSources.map((src, i) => ({
+          id: `live-${i}`,
+          documentId: `live-${i}`,
+          title: src,
+          category: "Medical / Public",
+          source: src,
+          sourceUrl: "",
+          similarity: 1,
+        })),
+      ],
+      safety: { blocked: false, phiDetected: false, residentSpecific: false, urgent: false },
+      toolsUsed,
       auditMetadata: {
         displayName: this.displayName,
         icon: this.icon,
-        classification: classification.reason,
-        matchedKeywords: classification.matchedKeywords,
-        sourceRetrievalEnabled: false,
+        liveAPIUsed: liveContext.length > 0,
+        answerMode: result.verification.answerMode,
       },
     };
   }

@@ -36,24 +36,11 @@ export async function writeAuditLog({
 }: WriteAuditLogInput) {
   try {
     await db.query(
-      `
-      insert into audit_logs (
-        user_email,
-        action,
-        route,
-        metadata,
-        created_at
-      )
-      values ($1, $2, $3, $4, now())
-      `,
-      [
-        userEmail,
-        action,
-        route,
-        safeMetadata(metadata),
-      ]
+      `INSERT INTO action_logs (user_email, action, route, metadata, created_at)
+       VALUES ($1, $2, $3, $4, now())`,
+      [userEmail, action, route, safeMetadata(metadata)]
     );
-  } catch (error) {
-    console.error("Audit log write failed");
+  } catch {
+    // Silently skip if action_logs table not yet created
   }
 }

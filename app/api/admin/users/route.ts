@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { sendWelcomeEmail } from "@/lib/mailer";
 
 export const runtime = "nodejs";
 
@@ -53,13 +54,31 @@ export async function POST(req: Request) {
 
   try {
     const result = await db.query(
-      `INSERT INTO users (email, display_name, role, password_hash)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (email, display_name, role, password_hash, must_change_password)
+       VALUES ($1, $2, $3, $4, true)
        RETURNING id, email, display_name, role, is_active, created_at`,
       [email.toLowerCase().trim(), display_name.trim(), role, passwordHash]
     );
 
-    return NextResponse.json({ user: result.rows[0] }, { status: 201 });
+    const user = result.rows[0];
+
+    // Send welcome email — non-fatal if SMTP isn't configured yet
+    let emailSent = false;
+    let emailError: string | null = null;
+    try {
+      await sendWelcomeEmail({
+        to: user.email,
+        displayName: display_name.trim(),
+        tempPassword: password,
+        role,
+      });
+      emailSent = true;
+    } catch (mailErr: any) {
+      emailError = mailErr.message ?? "Email sending failed";
+      console.warn("[users] Welcome email failed:", emailError);
+    }
+
+    return NextResponse.json({ user, emailSent, emailError }, { status: 201 });
   } catch (err: any) {
     if (err.code === "23505") {
       return NextResponse.json(

@@ -10,14 +10,11 @@ export async function POST(req: Request) {
     const { email, password } = await req.json();
 
     if (!email || !password) {
-      return NextResponse.json(
-        { error: "Email and password are required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
     }
 
     const result = await db.query(
-      `SELECT id, email, display_name, role, password_hash
+      `SELECT id, email, display_name, role, password_hash, must_change_password
        FROM users
        WHERE email = $1 AND is_active = true
        LIMIT 1`,
@@ -27,15 +24,10 @@ export async function POST(req: Request) {
     const user = result.rows[0];
 
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-      return NextResponse.json(
-        { error: "Incorrect email or password" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Incorrect email or password" }, { status: 401 });
     }
 
-    await db.query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [
-      user.id,
-    ]);
+    await db.query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [user.id]);
 
     const token = await createSessionCookie({
       id: user.id,
@@ -44,7 +36,11 @@ export async function POST(req: Request) {
       role: user.role,
     });
 
-    const response = NextResponse.json({ ok: true });
+    const response = NextResponse.json({
+      ok: true,
+      mustChangePassword: Boolean(user.must_change_password),
+    });
+
     response.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

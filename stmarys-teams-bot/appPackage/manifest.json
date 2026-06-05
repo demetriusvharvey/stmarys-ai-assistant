@@ -4,24 +4,24 @@
     "version": "1.0.0",
     "id": "${{TEAMS_APP_ID}}",
     "developer": {
-        "name": "My App, Inc.",
-        "websiteUrl": "https://www.example.com",
-        "privacyUrl": "https://www.example.com/privacy",
-        "termsOfUseUrl": "https://www.example.com/termofuse"
+        "name": "St. Mary's Home",
+        "websiteUrl": "https://saintmaryshome.org",
+        "privacyUrl": "https://saintmaryshome.org/privacy",
+        "termsOfUseUrl": "https://saintmaryshome.org/terms"
     },
     "icons": {
         "color": "color.png",
         "outline": "outline.png"
     },
     "name": {
-        "short": "stmarys-teams-bot${{APP_NAME_SUFFIX}}",
-        "full": "full name for stmarys-teams-bot"
+        "short": "St. Mary's AI${{APP_NAME_SUFFIX}}",
+        "full": "St. Mary's Home AI Knowledge Assistant"
     },
     "description": {
-        "short": "short description for stmarys-teams-bot",
-        "full": "full description for stmarys-teams-bot"
+        "short": "Ask questions about policies, IT, HR, and operations.",
+        "full": "St. Mary's AI Workforce gives staff instant answers about internal policies, procedures, IT troubleshooting, HR processes, compliance, scheduling, and more — directly inside Microsoft Teams."
     },
-    "accentColor": "#FFFFFF",
+    "accentColor": "#0f766e",
     "supportsChannelFeatures": "tier1",
     "bots": [
         {
@@ -35,17 +35,23 @@
             "isNotificationOnly": false,
             "commandLists": [
                 {
-                    "scopes": [
-                        "personal"
-                    ],
+                    "scopes": ["personal", "team", "groupChat"],
                     "commands": [
                         {
-                            "title": "How can you help me?",
-                            "description": "How can you help me?"
+                            "title": "What is the attendance policy?",
+                            "description": "Look up the attendance or call-out policy"
                         },
                         {
-                            "title": "How to develop agent for Teams?",
-                            "description": "How can I develop agents with Microsoft 365 Agents Toolkit?"
+                            "title": "Submit an IT ticket",
+                            "description": "Report a technical issue to IT Support"
+                        },
+                        {
+                            "title": "How do I request PTO?",
+                            "description": "Get help with PTO, Paylocity, or payroll questions"
+                        },
+                        {
+                            "title": "What can you do?",
+                            "description": "See all available agents and capabilities"
                         }
                     ]
                 }
@@ -59,5 +65,7 @@
         "identity",
         "messageTeamMembers"
     ],
-    "validDomains": []
+    "validDomains": [
+        "${{BOT_DOMAIN}}"
+    ]
 }

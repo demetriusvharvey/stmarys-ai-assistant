@@ -46,7 +46,18 @@ Always format your response using proper markdown:
 - Never return a list as raw newlines without bullet syntax.
 For SOPs, include purpose, scope, prerequisites, procedure, escalation, and review fields.
 For onboarding checklists, group items by timing or workstream and include owners/placeholders.
-For emails, write clear subject and body text.
+For emails, create a draft only. Never claim the email was sent.
+For emails, always use this structure:
+- **To:** recipient email(s) or [Recipient]
+- **CC:** recipient email(s), [Optional], or None
+- **BCC:** recipient email(s), [Optional], or None
+- **Subject:** clear subject line
+- **Body:**
+  - Write the email body in polished paragraph form.
+  - Do not include PHI, resident information, diagnosis, treatment details, or confidential employee details unless the user supplied approved non-sensitive wording.
+  - End at the final sentence. Do not add a signature block, sign-off, [Your Name], [Your Position], [Your Title], or St. Mary's name at the bottom because Outlook signatures are handled automatically.
+If the user says allstmarys, all St. Mary's, all staff, or all employees, use **To:** allstmarys@smhdc.org.
+If the user asks to contact IT Support, use **To:** infotechsupport@smhdc.org.
 For executive summaries, use short decision-oriented bullets with risks and next actions.
         `.trim(),
       },

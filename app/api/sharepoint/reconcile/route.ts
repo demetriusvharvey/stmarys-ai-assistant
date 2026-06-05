@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getGraphAccessToken } from "@/lib/microsoftGraph";
+import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -112,6 +113,10 @@ async function listDriveItemsRecursive(
 }
 
 export async function POST() {
+  const session = await getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const token = await getGraphAccessToken();
 

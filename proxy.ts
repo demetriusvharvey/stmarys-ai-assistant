@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { jwtVerify } from "jose";
-import { verifyAdminSessionToken } from "@/lib/adminSession";
+import { jwtVerify, type JWTPayload } from "jose";
 
 const COOKIE_NAME = "smhdc_session";
-const ADMIN_COOKIE_NAME = "stmarys_admin_session";
 
 const PUBLIC_PATHS = [
   "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/change-password",
   "/api/auth/login",
   "/api/auth/logout",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
+  "/api/auth/change-password",
   "/api/ai-tools",   // MCP server and public AI tool endpoints
   "/_next",
   "/favicon.ico",
@@ -26,6 +30,10 @@ const ADMIN_PATHS = [
   "/api/admin",
   "/api/feedback/list",
 ];
+
+type AppSessionPayload = JWTPayload & {
+  role?: string;
+};
 
 function isPublic(pathname: string) {
   return (
@@ -49,14 +57,17 @@ function hasInternalSecret(req: NextRequest): boolean {
   );
 }
 
-async function hasAdminSession(req: NextRequest): Promise<boolean> {
-  const secret = process.env.INTERNAL_ADMIN_SECRET;
-  if (!secret) return false;
+async function getSessionPayload(req: NextRequest): Promise<AppSessionPayload | null> {
+  const token = req.cookies.get(COOKIE_NAME)?.value;
+  if (!token) return null;
 
-  const token = req.cookies.get(ADMIN_COOKIE_NAME)?.value;
-  if (!token) return false;
-
-  return verifyAdminSessionToken(token, secret);
+  try {
+    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+    return payload as AppSessionPayload;
+  } catch {
+    return null;
+  }
 }
 
 export async function proxy(req: NextRequest) {
@@ -67,40 +78,37 @@ export async function proxy(req: NextRequest) {
   // Allow MCP server and service-to-service calls
   if (hasInternalSecret(req)) return NextResponse.next();
 
+  const session = await getSessionPayload(req);
+
   if (isAdminPath(pathname)) {
-    if (await hasAdminSession(req)) return NextResponse.next();
+    if (session?.role === "admin") return NextResponse.next();
 
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
         {
           success: false,
-          error: "Admin access required.",
+          error: "Admin role required.",
         },
-        { status: 401 }
+        { status: 403 }
       );
     }
 
-    const loginUrl = new URL("/admin/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
+    if (!session) {
+      const loginUrl = new URL("/login", req.url);
+      loginUrl.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+
+    return NextResponse.redirect(new URL("/", req.url));
   }
 
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-
-  if (!token) {
+  if (!session) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  try {
-    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
-    await jwtVerify(token, secret);
-    return NextResponse.next();
-  } catch {
-    const loginUrl = new URL("/login", req.url);
-    return NextResponse.redirect(loginUrl);
-  }
+  return NextResponse.next();
 }
 
 export const config = {

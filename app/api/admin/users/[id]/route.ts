@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { sendPasswordResetEmail } from "@/lib/mailer";
 
 export const runtime = "nodejs";
 
@@ -35,17 +36,11 @@ export async function PATCH(
       );
     }
     const passwordHash = await bcrypt.hash(new_password, 12);
-    await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [
-      passwordHash,
-      id,
-    ]);
+    await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [passwordHash, id]);
   }
 
   if (is_active !== undefined) {
-    await db.query(`UPDATE users SET is_active = $1 WHERE id = $2`, [
-      is_active,
-      id,
-    ]);
+    await db.query(`UPDATE users SET is_active = $1 WHERE id = $2`, [is_active, id]);
   }
 
   if (role !== undefined) {
@@ -61,5 +56,24 @@ export async function PATCH(
     [id]
   );
 
-  return NextResponse.json({ user: result.rows[0] });
+  const user = result.rows[0];
+
+  // If password was reset, email the user their new password
+  let emailSent = false;
+  let emailError: string | null = null;
+  if (new_password !== undefined && user) {
+    try {
+      await sendPasswordResetEmail({
+        to: user.email,
+        displayName: user.display_name,
+        newPassword: new_password,
+      });
+      emailSent = true;
+    } catch (mailErr: any) {
+      emailError = mailErr.message ?? "Email sending failed";
+      console.warn("[users] Password reset email failed:", emailError);
+    }
+  }
+
+  return NextResponse.json({ user, emailSent, emailError });
 }

@@ -1,12 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Strip any credentials from the URL immediately — they should never appear there
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("email") || url.searchParams.has("password")) {
+      url.searchParams.delete("email");
+      url.searchParams.delete("password");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -28,8 +38,12 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    const data = await res.json();
+    if (data.mustChangePassword) {
+      window.location.href = "/change-password";
+    } else {
+      window.location.href = "/";
+    }
   }
 
   return (
@@ -64,6 +78,7 @@ export default function LoginPage() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 autoComplete="email"
                 required
@@ -83,6 +98,7 @@ export default function LoginPage() {
               </label>
               <input
                 id="password"
+                name="password"
                 type="password"
                 autoComplete="current-password"
                 required
@@ -109,15 +125,17 @@ export default function LoginPage() {
           </div>
         </form>
 
-        <p className="mt-5 text-center text-xs text-[#9ca3af]">
-          Don&apos;t have an account or forgot your password?{" "}
-          <a
-            href="mailto:infotechsupport@smhdc.org"
-            className="underline underline-offset-2 hover:text-[#6b7280]"
-          >
-            Contact IT Support
+        <div className="mt-5 flex flex-col items-center gap-1.5 text-center text-xs text-[#9ca3af]">
+          <a href="/forgot-password" className="underline underline-offset-2 hover:text-[#6b7280]">
+            Forgot your password?
           </a>
-        </p>
+          <span>
+            No account?{" "}
+            <a href="mailto:infotechsupport@smhdc.org" className="underline underline-offset-2 hover:text-[#6b7280]">
+              Contact IT Support
+            </a>
+          </span>
+        </div>
 
         <p className="mt-6 text-center text-[11px] text-[#c4c9d4]">
           For authorized St. Mary&apos;s staff only. All activity is logged.

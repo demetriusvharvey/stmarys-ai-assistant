@@ -9,6 +9,8 @@ export async function GET() {
         d.title,
         d.category,
         d.source,
+        d.source_url,
+        d.is_active,
         d.created_at,
         count(dc.id)::int as chunks
       from documents d

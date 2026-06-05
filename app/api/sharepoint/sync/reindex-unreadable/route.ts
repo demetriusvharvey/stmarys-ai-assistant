@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -95,6 +96,10 @@ async function findUnreadableDocuments(limit: number) {
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const body = await req.json().catch(() => ({}));
     const limit = getLimit(body.limit);

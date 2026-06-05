@@ -45,6 +45,7 @@ export default function AdminUsersPage() {
   const [form, setForm] = useState({ email: "", display_name: "", role: "staff", password: "" });
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<{ sent: boolean; error?: string } | null>(null);
 
   // Reset password
   const [resetTarget, setResetTarget] = useState<User | null>(null);
@@ -76,6 +77,7 @@ export default function AdminUsersPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setFormError("");
+    setEmailStatus(null);
     setFormLoading(true);
     const res = await fetch("/api/admin/users", {
       method: "POST",
@@ -85,6 +87,10 @@ export default function AdminUsersPage() {
     const data = await res.json();
     setFormLoading(false);
     if (!res.ok) { setFormError(data.error || "Failed to create user"); return; }
+    setEmailStatus({
+      sent: data.emailSent === true,
+      error: data.emailError || undefined,
+    });
     setForm({ email: "", display_name: "", role: "staff", password: "" });
     setShowCreate(false);
     fetchUsers();
@@ -144,6 +150,12 @@ export default function AdminUsersPage() {
               ← Back to Chat
             </button>
             <button
+              onClick={() => router.push("/admin/users/import")}
+              className="rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#374151] hover:bg-[#f9fafb]"
+            >
+              📥 Bulk Import
+            </button>
+            <button
               onClick={() => { setShowCreate(true); setFormError(""); }}
               className="rounded-lg bg-[#0f766e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#115e59]"
             >
@@ -151,6 +163,31 @@ export default function AdminUsersPage() {
             </button>
           </div>
         </div>
+
+        {/* Email status banner */}
+        {emailStatus && (
+          <div className={`mb-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+            emailStatus.sent
+              ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#166534]"
+              : "border-[#fde68a] bg-[#fffbeb] text-[#92400e]"
+          }`}>
+            <span className="text-base">{emailStatus.sent ? "✅" : "⚠️"}</span>
+            <div>
+              <p className="font-medium">
+                {emailStatus.sent ? "Welcome email sent successfully." : "Account created — welcome email could not be sent."}
+              </p>
+              {emailStatus.error && (
+                <p className="mt-0.5 text-xs opacity-80">{emailStatus.error}</p>
+              )}
+              {!emailStatus.sent && (
+                <p className="mt-0.5 text-xs opacity-80">
+                  Share the temporary password with the staff member directly.
+                </p>
+              )}
+            </div>
+            <button onClick={() => setEmailStatus(null)} className="ml-auto text-lg leading-none opacity-40 hover:opacity-70">×</button>
+          </div>
+        )}
 
         {/* Create user modal */}
         {showCreate && (
@@ -333,8 +370,8 @@ export default function AdminUsersPage() {
           )}
         </div>
 
-        <p className="mt-4 text-center text-xs text-[#c4c9d4]">
-          Admin panel — St. Mary&apos;s AI Workforce. All account changes are logged.
+        <p className="mt-4 text-center text-xs text-[#9ca3af]">
+          All account changes are logged. Contact IT support for help.
         </p>
       </div>
     </main>
